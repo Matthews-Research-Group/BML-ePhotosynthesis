@@ -31,7 +31,7 @@ string_vector c3_leaf_photosynthesis::get_inputs()
         "specific_heat_of_air",         // J / kg / K
         "minimum_gbw",                  // mol / m^2 / s
         "windspeed_height",             // m
-        "enzyme_sf"                     // dimensionless 
+        "exp_id"                     // dimensionless 
     };
 }
 
@@ -82,7 +82,7 @@ void c3_leaf_photosynthesis::do_operation() const
             incident_ppfd, leaf_temperature, rh, vmax1, jmax,
             tpu_rate_max, Rd, b0, b1, Gs_min, Catm, atmospheric_pressure, O2,
             theta, StomataWS, water_stress_approach,
-            electrons_per_carboxylation, electrons_per_oxygenation,enzyme_sf);
+            electrons_per_carboxylation, electrons_per_oxygenation,exp_id);
 
     // Update the outputs
     update(Assim_op, photo.Assim);

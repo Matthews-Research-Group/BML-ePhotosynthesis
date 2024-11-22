@@ -49,9 +49,10 @@ struct c3_str c3photoC(
     int const water_stress_approach,           // (flag)
     double const electrons_per_carboxylation,  // self-explanatory units
     double const electrons_per_oxygenation,    // self-explanatory units
-    double const enzyme_sf                     // dimensionless 
+    double const exp_id                        // dimensionless 
 )
 {
+//ePhotosynthesis needs the total Q. It caluclates absorbed Q by itself assuming reflectance of 0.1 and transmittance of 0.05
     // Get leaf temperature in Kelvin
     double const Tleaf_K =
         Tleaf + conversion_constants::celsius_to_kelvin;  // K
@@ -80,7 +81,7 @@ struct c3_str c3photoC(
         Ci = (Ci_pa / AP) * 1e6;                  // micromol / mol
 
         //call ephotosynthesis
-        ephoto_Result result    = assim_ephoto(Tleaf,Qp,Ci,enzyme_sf);
+        ephoto_Result result    = assim_ephoto(Tleaf,Qp,Ci,exp_id);
         double co2_assim_ephoto = result.A; 
         penalty          = result.penalty; 
         //ephoto returns the Gross A, which should not be negative!
@@ -141,19 +142,18 @@ struct c3_str c3photoC(
     return result;
 }
 
-ephoto_Result assim_ephoto(double LeafT, double PAR, double Ci,double enzyme_sf)
+ephoto_Result assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
 {
-//enzyme_sf is no longer used. Kept as dummy variable for now
         bool record    = true;//turn this on to calculate penalties
         bool runBioCro = true;//turn this on to NOT substract the penalties from A
-        double stoptime=5000.0, begintime=0.0, stepsize=0.5;
-        int  maxSubSteps=3000;
+        double stoptime = 5000.0, begintime=0.0, stepsize=0.5;
+        int  maxSubSteps = 2500;
 //        double abstol = 9.9e-6, reltol = 1e-4;
 //        double abstol = 9.9e-6, reltol = 1e-5;
         double abstol = 1e-6, reltol = 1e-6;
         std::string evn_input="InputEvn.txt";
         std::string atpcost="InputATPCost.txt";
-        std::string enzymeFile="Einput7.txt";
+        std::string enzymeFile="Einput_all_experiments/Einput7_"+std::to_string(static_cast<int>(exp_id))+".txt";
         std::map<std::string, std::string> inputs;
 
         readFile1(evn_input, inputs);
@@ -266,7 +266,7 @@ struct c3_str c3photoC_FvCB(
         Tleaf + conversion_constants::celsius_to_kelvin;  // K
 
     // Define the leaf reflectance
-    double const leaf_reflectance = 0.2;  // dimensionless
+    double const leaf_reflectance = 0.15;  // dimensionless
 
     // Temperature corrections are from the following sources:
     // - Bernacchi et al. (2003) Plant, Cell and Environment, 26(9), 1419-1430.

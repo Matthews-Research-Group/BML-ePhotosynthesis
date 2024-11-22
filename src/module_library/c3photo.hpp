@@ -31,7 +31,7 @@ struct c3_str c3photoC(
     int const water_stress_approach,
     double const electrons_per_carboxylation,
     double const electrons_per_oxygenation,
-    double const enzyme_sf);
+    double const exp_id);
 
 struct c3_str c3photoC_FvCB(
     double const Qp,
@@ -60,7 +60,7 @@ struct ephoto_Result {
     double A;
     double penalty;
 };
-ephoto_Result assim_ephoto(double LeafT,double PAR, double Ci,double enzyme_sf);
+ephoto_Result assim_ephoto(double LeafT,double PAR, double Ci, double exp_id);
 
 void readFile1(const std::string &filename, std::map<std::string,std::string> &mapper);
 void readFile2(const std::string &filename, std::map<std::string, double> &mapper); 
