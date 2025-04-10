@@ -265,9 +265,6 @@ struct c3_str c3photoC_FvCB(
     double const Tleaf_K =
         Tleaf + conversion_constants::celsius_to_kelvin;  // K
 
-    // Define the leaf reflectance
-    double const leaf_reflectance = 0.15;  // dimensionless
-
     // Temperature corrections are from the following sources:
     // - Bernacchi et al. (2003) Plant, Cell and Environment, 26(9), 1419-1430.
     //   https://doi.org/10.1046/j.0016-8025.2003.01050.x
@@ -288,7 +285,7 @@ struct c3_str c3photoC_FvCB(
         0.352 + 0.022 * Tleaf - 3.4 * pow(Tleaf, 2) / 1e4;  // dimensionless (Bernacchi et al. (2003))
 
     double const I2 =
-        Qp * dark_adapted_phi_PSII * (1.0 - leaf_reflectance) / 2.0;  // micromol / m^2 / s
+        Qp * dark_adapted_phi_PSII / 2.0;  // micromol / m^2 / s
 
     double const J =
         (Jmax + I2 - sqrt(pow(Jmax + I2, 2) - 4.0 * theta * I2 * Jmax)) /
