@@ -5,9 +5,10 @@ PARENT_DIR  := $(shell dirname $(CURRENT_DIR))
 PARENT_OF_PARENT_DIR := $(shell dirname $(PARENT_DIR))
 ephoto_path := $(PARENT_OF_PARENT_DIR)/ePhotosynthesis_C
 
-conda_path := $(shell conda env list | grep ephoto | awk '{print $$NF}')
-
-PKG_CPPFLAGS += -I$(ephoto_path)/include -I$(conda_path)/include
+#conda_path := $(shell conda env list | grep ephoto | awk '{print $$NF}')
+#
+#-I$(conda_path)/include
+PKG_CPPFLAGS += -I$(ephoto_path)/include -I$(ephoto_path)/build 
 PKG_CPPFLAGS += -DR_NO_REMAP -O3 -g -Wall -ggdb3
 
 #YH: Both PKG_LIBS and the system environment need the ephoto's library path 
