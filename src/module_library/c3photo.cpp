@@ -9,6 +9,7 @@
 #include "c3photo.h"
 #include "ePhoto_assim.h"                //
 #include <functional>
+#include <iostream>
 
 using physical_constants::dr_boundary;
 using physical_constants::dr_stomata;
@@ -110,7 +111,8 @@ photosynthesis_outputs c3photoC(
 
     // this lambda function equals zero
     // only if assim satisfies both FvCB and Ball Berry model
-    if(model_type==1){
+    // YH: if Q is near zero, we still use FvCB as ePhoto seems very stiff
+    if(model_type==1 || Qp_ePhoto < 50.0){
       check_assim_rate = [=, &FvCB_res, &BB_res, &an_conductance, &Gs, &Ci, &Vc, &Rp](double const assim) {
           // The net CO2 assimilation is the smaller of the biochemistry-limited
           // and conductance-limited rates. This will prevent the calculated Ci
@@ -208,7 +210,11 @@ photosynthesis_outputs c3photoC(
         Ca * gbw / dr_boundary                 // The maximum conductance-limited An, which occurs for gsw = infinity
     });                                        // micromol / m^2 / s
     
-    double const epsilon = 1e-6;
+   // for ePhotosynthesis, this matters apparently.
+   // Using a large epsilon can significantly increase the number of iterations
+   // Using 1e-12 (same as the atol/rtol) can cause the secant the end prematurely 
+   // 1e-11 seems to be an efficiency choice
+    double const epsilon = 1e-11;
 
     assim_guess_1 += epsilon;
 
@@ -227,6 +233,9 @@ photosynthesis_outputs c3photoC(
         1e-12,
         Assim_check,
         iterations);
+
+    //std::cout<<"iterations is,"<<iterations<<",model type is,"<<model_type<<",Assim_check is"<<Assim_check<<std::endl;
+    //std::cout<<"envs are,"<<Tleaf<<","<<Qp_ePhoto<<","<<Ci<<std::endl;
 
     return photosynthesis_outputs{
         /* .Assim = */ co2_assim_rate,              // micromol / m^2 / s
