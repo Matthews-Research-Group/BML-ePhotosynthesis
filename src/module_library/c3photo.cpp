@@ -112,7 +112,7 @@ photosynthesis_outputs c3photoC(
     // this lambda function equals zero
     // only if assim satisfies both FvCB and Ball Berry model
     // YH: if Q is near zero, we still use FvCB as ePhoto seems very stiff
-    if(model_type==1 || Qp_ePhoto < 50.0){
+    if(model_type==1 || Qp_ePhoto < 5.0){
       check_assim_rate = [=, &FvCB_res, &BB_res, &an_conductance, &Gs, &Ci, &Vc, &Rp](double const assim) {
           // The net CO2 assimilation is the smaller of the biochemistry-limited
           // and conductance-limited rates. This will prevent the calculated Ci

@@ -188,7 +188,7 @@ energy_balance_outputs leaf_energy_balance(
     double const storage = Phi_N - H - lambda * E;              // J / m^2 / s
 
     // Relative humidity just outside the leaf boundary layer
-    double const RH_canopy = (rho_w_air - E / gbw_canopy) / rho_w_sat;  // dimensionless
+    double const RH_canopy = (rho_w_air + E / gbw_canopy) / rho_w_sat;  // dimensionless
 
     // Potential evapotranspiration can be calculated assuming infinite stomatal
     // conductance; here we call this "Penman transpiration."
