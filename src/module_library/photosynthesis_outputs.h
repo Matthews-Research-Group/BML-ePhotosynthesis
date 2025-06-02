@@ -14,6 +14,7 @@ struct photosynthesis_outputs {
     double GrossAssim;         //!< Gross CO2 assimilation rate (micromol / m^2 / s)
     double Gs;                 //!< Stomatal conductance to water vapor (mol / m^2 / s)
     double RHs;                //!< Relative humidity at the leaf surface (dimensionless)
+    double RL;                 //!< Rate of non-photorespiratory CO2 release in the light (micromol / m^2 / s)
     double Rp;                 //!< Rate of photorespiration (micromol / m^2 / s)
     size_t iterations;         //!< Number of iterations used by convergence loop
     double penalty;            //!< 

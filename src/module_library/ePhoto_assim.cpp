@@ -29,7 +29,7 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
         int  maxSubSteps = 2500;
 //        double abstol = 9.9e-6, reltol = 1e-4;
 //        double abstol = 9.9e-6, reltol = 1e-5;
-        double abstol = 1e-6, reltol = 1e-6;
+        double abstol = 1e-6, reltol = 1e-5;
         std::string evn_input="InputEvn.txt";
         std::string atpcost="InputATPCost.txt";
         std::string enzymeFile="Einput_all_experiments/Einput7_"+std::to_string(static_cast<int>(exp_id))+".txt";
