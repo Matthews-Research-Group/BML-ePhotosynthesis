@@ -82,7 +82,9 @@ class c3_leaf_photosynthesis : public direct_module
           RH_canopy_op{get_op(output_quantities, "RH_canopy")},
           RL_op{get_op(output_quantities, "RL")},
           Rp_op{get_op(output_quantities, "Rp")},
-          TransR_op{get_op(output_quantities, "TransR")}
+          TransR_op{get_op(output_quantities, "TransR")},
+          iterations_op{get_op(output_quantities, "iterations")},
+          Assim_check_op{get_op(output_quantities, "Assim_check")}
     {
     }
     static string_vector get_inputs();
@@ -153,6 +155,8 @@ class c3_leaf_photosynthesis : public direct_module
     double* RL_op;
     double* Rp_op;
     double* TransR_op;
+    double* iterations_op;
+    double* Assim_check_op;
 
     // Main operation
     void do_operation() const;

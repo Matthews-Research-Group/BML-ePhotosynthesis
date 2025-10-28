@@ -219,13 +219,19 @@ photosynthesis_outputs c3photoC(
     assim_guess_1 += epsilon;
 
     // Run the secant method
-    assim_guess_0 = 0.0;
-    root_algorithm::root_finder<root_algorithm::fixed_point> solver{100, 1e-2, 1e-2};
+    root_algorithm::root_finder<root_algorithm::secant> solver{50, 1e-2, 1e-4};
+//    root_algorithm::root_finder<root_algorithm::fixed_point> solver{50, 1e-2, 1e-4};
     root_algorithm::result_t result = solver.solve(
         check_assim_rate,
-        assim_guess_0
+        assim_guess_0,
+        assim_guess_1
         );
 
+    if (abs(result.residual) > 0.1) {
+        std::cout<<"envs are,"<<Tleaf<<","<<Qp_ePhoto<<","<<Ci<<std::endl;
+        std::cout<<"iterations is,"<<result.iteration<<",model type is,"<<model_type<<",Assim_check is"<<result.residual<<std::endl;
+        throw std::range_error("Thrown in c3photo: residual is too large");
+    }
     //std::cout<<"envs are,"<<Tleaf<<","<<Qp_ePhoto<<","<<Ci<<std::endl;
     //std::cout<<"assim_guess_0,"<<assim_guess_0<<",assim_guess_1,"<<assim_guess_1<<std::endl;
     //std::cout<<"iterations is,"<<result.iteration<<",model type is,"<<model_type<<",Assim_check is"<<result.residual<<std::endl;

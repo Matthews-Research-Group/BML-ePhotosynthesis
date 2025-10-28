@@ -27,9 +27,7 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
         bool runBioCro = true;//turn this on to NOT substract the penalties from A
         double stoptime = 5000.0, begintime=0.0, stepsize=0.5;
         int  maxSubSteps = 2500;
-//        double abstol = 9.9e-6, reltol = 1e-4;
-//        double abstol = 9.9e-6, reltol = 1e-5;
-        double abstol = 1e-6, reltol = 1e-5;
+        double abstol = 1e-6, reltol = 1e-6;
         std::string evn_input="InputEvn.txt";
         std::string atpcost="InputATPCost.txt";
         std::string enzymeFile="Einput_all_experiments/Einput7_"+std::to_string(static_cast<int>(exp_id))+".txt";

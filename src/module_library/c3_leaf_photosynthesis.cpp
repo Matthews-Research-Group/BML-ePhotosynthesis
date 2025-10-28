@@ -73,7 +73,9 @@ string_vector c3_leaf_photosynthesis::get_outputs()
         "RH_canopy",         // dimensionless
         "RL",                // micromol / m^2 / s
         "Rp",                // micromol / m^2 / s
-        "TransR"             // mmol / m^2 / s
+        "TransR",             // mmol / m^2 / s
+        "iterations",             // 
+        "Assim_check"             //
     };
 }
 
@@ -160,4 +162,6 @@ void c3_leaf_photosynthesis::do_operation() const
     update(RL_op, photo.RL);
     update(Rp_op, photo.Rp);
     update(TransR_op, et.TransR);
+    update(iterations_op, photo.iterations);
+    update(Assim_check_op, photo.Assim_check);
 }
