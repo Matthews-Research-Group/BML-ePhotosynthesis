@@ -1,8 +1,9 @@
 #include <algorithm>  // for std::min, std::max
 #include <limits>     // for std::numeric_limits
+#include "../framework/constants.h"  // for eps_zero
 #include "FvCB_assim.h"
 
-double inf = std::numeric_limits<double>::infinity();
+using calculation_constants::eps_zero;
 
 /**
  *  @brief Computes the net CO2 assimilation rate (and other values) using the
@@ -13,14 +14,15 @@ double inf = std::numeric_limits<double>::infinity();
  *  is given by
  *
  *  \f[
- *      A_n = \left( 1 - \Gamma^* / C \right) \cdot V_c - R_d, \qquad \text{(1)}
+ *      A_n = \left( 1 - \Gamma^* / C \right) \cdot V_c - R_L, \qquad \text{(1)}
  *  \f]
  *
- *  where \f$ \Gamma^* \f$ is the CO2 compensation point in the absence of day
- *  respiration, \f$ C \f$ is the concentration of CO2 in the vicinity of
- *  Rubisco, \f$ V_c \f$ is the RuBP carboxylation rate, and \f$ R_d \f$ is the
- *  rate of day respiration. The RuBP carboxylation rate is taken to be the
- *  smallest of three potential carboxylation rates:
+ *  where \f$ \Gamma^* \f$ is the CO2 compensation point in the absence of
+ *  non-photorespiratory CO2 release, \f$ C \f$ is the concentration of CO2 in
+ *  the vicinity of Rubisco, \f$ V_c \f$ is the RuBP carboxylation rate, and
+ *  \f$ R_L \f$ is the rate of non-photorespiratory CO2 release in the light.
+ *  The RuBP carboxylation rate is taken to be the smallest of three potential
+ *  carboxylation rates:
  *
  *  \f[ V_c = \text{min} \{ W_c, W_j, W_p \}. \qquad \text{(2)} \f]
  *
@@ -127,16 +129,21 @@ FvCB_outputs FvCB_assim(
     double electrons_per_oxygenation     // self-explanatory units
 )
 {
+    // Define infinity
+    double const inf = std::numeric_limits<double>::infinity();
+
     // Initialize
     FvCB_outputs result;
 
     // Calculate rates
-    if (Ci == 0.0) {
+    if (Ci < -eps_zero) {
+        throw std::range_error("Thrown in FvCB_assim: Ci is negative.");
+    } else if (Ci <= eps_zero) {
         // RuBP-saturated net assimilation rate when Ci is 0
         double Ac0 =
             -Gstar * Vcmax / (Kc * (1 + Oi / Ko)) - RL;  // micromol / m^2 / s
 
-        // RuBP-regeneration-limited net assimilation when C is 0
+        // RuBP-regeneration-limited net assimilation when Ci is 0
         double Aj0 =
             -J / (2.0 * electrons_per_oxygenation) - RL;  // micromol / m^2 / s
 

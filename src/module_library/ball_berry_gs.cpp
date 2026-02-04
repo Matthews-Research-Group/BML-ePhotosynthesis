@@ -117,7 +117,7 @@ stomata_outputs ball_berry_gs(
                       (dr_boundary / gbw) * assimilation;  // mol / mol.
 
     // Check for error conditions (Cs = 0 or Cs < 0)
-    if (Cs < 0.0) {
+    if (Cs < -eps_zero) {
         throw std::range_error("Thrown in ball_berry_gs: Cs is negative.");
     } else if (Cs <= eps_zero) {
         // Stomatal conductance becomes infinite as Cs approaches zero from the
