@@ -1,1 +1,2 @@
+#you may need this on Linux
 export LD_LIBRARY_PATH=/home/n-z/yufenghe/GitHub/BioCro-ePhotosynthesis-v2/models/ePhotosynthesis_C/build:$LD_LIBRARY_PATH

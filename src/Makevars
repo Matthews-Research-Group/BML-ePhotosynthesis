@@ -1,51 +1,46 @@
+# 1. Path definitions
 # Get the current directory path of the Makevars
 CURRENT_DIR := $(CURDIR)
 PARENT_DIR  := $(shell dirname $(CURRENT_DIR))
 # Get the parent of the parent directory path
 PARENT_OF_PARENT_DIR := $(shell dirname $(PARENT_DIR))
 ephoto_path := $(PARENT_OF_PARENT_DIR)/ePhotosynthesis_C
+ABS_EPHOTO_PATH := $(abspath $(ephoto_path)/build)
 
 #conda_path := $(shell conda env list | grep ephoto | awk '{print $$NF}')
 #
-#-I$(conda_path)/include
+# 2. Compiler Flags
 PKG_CPPFLAGS += -I$(ephoto_path)/include -I$(ephoto_path)/build 
-PKG_CPPFLAGS += -DR_NO_REMAP -O3 -g -Wall -ggdb3
+#PKG_CPPFLAGS += -I$(CURDIR)/../inc
+PKG_CPPFLAGS += -DR_NO_REMAP 
+PKG_CXXFLAGS += -O3 -g -Wall -ggdb3 -std=c++17
 
-#YH: Both PKG_LIBS and the system environment need the ephoto's library path 
-PKG_LIBS += -L$(ephoto_path)/build -lEPhotosynthesis
+# 3. Try to get sundials paths from pkg-config
+PKG_CONFIG_INC = $(shell pkg-config --cflags sundials 2>/dev/null)
+PKG_CONFIG_LIB = $(shell pkg-config --libs sundials 2>/dev/null)
+BREW_INC = -I/opt/homebrew/include
+BREW_LIB = -L/opt/homebrew/lib -lsundials_cvode -lsundials_nvecserial
+PKG_CPPFLAGS += $(if $(PKG_CONFIG_INC), $(PKG_CONFIG_INC), $(BREW_INC))
+PKG_LIBS += $(if $(PKG_CONFIG_LIB), $(PKG_CONFIG_LIB), $(BREW_LIB))
 
+# 4. EPhotosynthesis Linking & Rpath
+PKG_LIBS += -Wl,-rpath,$(ABS_EPHOTO_PATH) -L$(ABS_EPHOTO_PATH) -lEPhotosynthesis 
+
+# 5. Source/Object setup
 SOURCES = $(wildcard *.cpp module_library/*.cpp framework/*.cpp framework/ode_solver_library/*.cpp framework/utils/*.cpp)
 OBJECTS = $(SOURCES:.cpp=.o)
+SHLIB = BMLePhoto.so
 
+# 6. The "Hard-Link" Fix for macOS
+all: $(SHLIB)
+	@if [ "$(shell uname)" = "Darwin" ]; then \
+                echo "Fixing macOS library link for: $(SHLIB)"; \
+		install_name_tool -change "@rpath/libEPhotosynthesis.dylib" \
+		"$(ABS_EPHOTO_PATH)/libEPhotosynthesis.dylib" \
+		$(SHLIB); \
+	fi
 
-
-
-
-# The code below is a slightly modified version of the method for generating and
-# using dependency files presented at
-# http://make.mad-scientist.net/papers/advanced-auto-dependency-generation/#combine
-#
-# Modifications include:
-#
-# 1. Ensuring "all" is the default target.
-# 2. Setting a value for OUTPUT_OPTION (presumably needed, but not discussed in
-#    the paper).
-# 3. Replacing ".c" extensions with ".cpp".
-# 4. Defining COMPILE.cpp to use compiler and flag variables more closely
-#    matching what is given in the suffix rule for .cpp.o contained in the
-#    Makeconf file.
-# 5. Since this file is read in before Makeconf, we can't cancel the suffix rule
-#    listed there for making %.o files from %.cpp files by using the recipe-less
-#    rule "%.o : %.cpp", so we make our new rule for this into a static pattern
-#    rule, which automatically gives it higher priority.
-# 6. Modifying the recipe for making the directories that contain the dependency
-#    files so that the subdirectory module_library is also made.
-# 7. Changing the variable name SRCS to SOURCES to match what the
-#    previously-existing version of this file used.
-
-
-all:
-
+# --- Dependency Generation Logic ---
 DEPDIR := .deps
 DEPSUBDIRS = $(DEPDIR)/module_library $(DEPDIR)/framework $(DEPDIR)/framework/ode_solver_library $(DEPDIR)/framework/utils
 
