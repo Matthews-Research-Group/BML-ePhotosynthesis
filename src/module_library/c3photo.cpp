@@ -8,7 +8,7 @@
 #include "conductance_limited_assim.h"    // for conductance_limited_assim
 #include "FvCB_assim.h"                   // for FvCB_assim
 #include "../math/roots/onedim/dekker.h"  // for dekker
-#include "root_onedim.h"                  // for robust ePhoto root solving
+#include "../math/roots/onedim/illinois.h"  // for illinois
 #include "c3photo.h"
 #include "ePhoto_assim.h"                 // for assim_ephoto
 
@@ -154,18 +154,18 @@ photosynthesis_outputs c3photoC(
             Ca - A_min * (dr_boundary / gbw + dr_stomata / b0_adj);
         double constexpr Ci_min = 1e-6;
 
-        root_algorithm::root_finder<root_algorithm::dekker> solver{100, 1e-8, 1e-10};
-        root_algorithm::result_t result =
+        root_finding::dekker solver{100, 1e-8, 1e-10};
+        root_finding::result_t result =
             solver.solve(check_assim_rate, 0.718 * Ca, Ci_min, Ci_max * 1.01);
 
-        if (!root_algorithm::is_successful_relaxed(result.flag)) {
-            root_algorithm::root_finder<root_algorithm::illinois> fallback{200, 1e-8, 1e-10};
+        if (!root_finding::is_successful(result.flag)) {
+            root_finding::illinois fallback{200, 1e-8, 1e-10};
             auto fallback_result =
                 fallback.solve(check_assim_rate, Ci_min, Ci_max * 1.01);
-            if (!root_algorithm::is_successful(fallback_result.flag)) {
+            if (!root_finding::is_successful(fallback_result.flag)) {
                 throw std::runtime_error(
                     "ePhotosynthesis Ci solver failed: " +
-                    root_algorithm::flag_message(fallback_result.flag));
+                    root_finding::flag_message(fallback_result.flag));
             }
             result = fallback_result;
         }
