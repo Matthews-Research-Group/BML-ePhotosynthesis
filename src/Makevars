@@ -27,7 +27,7 @@ PKG_LIBS += $(if $(PKG_CONFIG_LIB), $(PKG_CONFIG_LIB), $(BREW_LIB))
 PKG_LIBS += -Wl,-rpath,$(ABS_EPHOTO_PATH) -L$(ABS_EPHOTO_PATH) -lEPhotosynthesis 
 
 # 5. Source/Object setup
-SOURCES = $(wildcard *.cpp module_library/*.cpp framework/*.cpp framework/ode_solver_library/*.cpp framework/utils/*.cpp)
+SOURCES = $(wildcard *.cpp module_library/*.cpp module_library/core/*.cpp framework/*.cpp framework/ode_solver_library/*.cpp framework/utils/*.cpp)
 OBJECTS = $(SOURCES:.cpp=.o)
 SHLIB = BMLePhoto.so
 
@@ -42,7 +42,7 @@ all: $(SHLIB)
 
 # --- Dependency Generation Logic ---
 DEPDIR := .deps
-DEPSUBDIRS = $(DEPDIR)/module_library $(DEPDIR)/framework $(DEPDIR)/framework/ode_solver_library $(DEPDIR)/framework/utils
+DEPSUBDIRS = $(DEPDIR)/module_library $(DEPDIR)/module_library/core $(DEPDIR)/framework $(DEPDIR)/framework/ode_solver_library $(DEPDIR)/framework/utils
 
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
 
