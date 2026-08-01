@@ -37,6 +37,8 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
         readFile1(atpcost, inputs);
 
         Variables *theVars = new Variables();
+        // Use the phosphate-pool scaling fitted for the LD11 calibration.
+        theVars->PS_scaling_factor = 0.982961287214682;
 
         readFile2(enzymeFile, theVars->EnzymeAct);
 
