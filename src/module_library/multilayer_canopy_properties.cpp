@@ -13,8 +13,9 @@ using std::vector;
 string_vector multilayer_canopy_properties::get_inputs(int /*nlayers*/)
 {
     return {
-        "par_incident_direct",     // J / (m^2 beam) / s [area perpendicular to beam]
-        "par_incident_diffuse",    // J / m^2 / s        [through any plane]
+        "solar",                          // micromol / m^2 / s
+        "irradiance_direct_fraction",     // dimensionless
+        "irradiance_diffuse_fraction",    // dimensionless
         "lai",                     // dimensionless from (m^2 leaf) / (m^2 ground). LAI of entire canopy.
         "cosine_zenith_angle",     // dimensionless
         "k_diffuse",               // (m^2 ground) / (m^2 leaf)
@@ -102,10 +103,7 @@ string_vector multilayer_canopy_properties::get_outputs(int nlayers)
 void multilayer_canopy_properties::run() const
 {
     // Calculate values of incident photosynthetically active photon flux
-    // density (PPFD) and absorbed shortwave energy throughout the canopy. Note
-    // that the `core::canopy_light` constructor expects input expects PPFD
-    // values, so we must convert photosynthetically active radiation (PAR)
-    // to PPFD using the energy content of light in the PAR band
+    // density (PPFD) and absorbed shortwave energy throughout the canopy.
     core::canopy_light::parameters params = {chil,
                                              cosine_zenith_angle,
                                              heightf,
@@ -119,8 +117,8 @@ void multilayer_canopy_properties::run() const
                                              par_energy_fraction};
 
     core::canopy_light canopy_light_model = {
-        par_incident_direct / par_energy_content,   // micromol / (m^2 beam) / s
-        par_incident_diffuse / par_energy_content,  // micromol / m^2 / s
+        irradiance_direct_fraction * solar,   // micromol / (m^2 beam) / s
+        irradiance_diffuse_fraction * solar,  // micromol / m^2 / s
         params};
     // Don't calculate anything based on the nitrogen profile
     if (lnfun != 0) {
