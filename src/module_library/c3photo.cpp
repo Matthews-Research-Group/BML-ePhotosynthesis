@@ -173,6 +173,12 @@ photosynthesis_outputs c3photoC(
         // ePhotosynthesis uses Ci directly and does not expose a distinct Cc.
         double const Ci = result.root;
         double const Cc = Ci;
+
+        // Dekker may return a stored bracket point that was not the most
+        // recently evaluated point. Re-evaluate the accepted root so all
+        // side-effect outputs correspond to Ci.
+        check_assim_rate(Ci);
+
         double const an_conductance = conductance_limited_assim(Ca, gbw, Gs);
 
         return photosynthesis_outputs{
@@ -267,7 +273,11 @@ photosynthesis_outputs c3photoC(
     }
 
     // Get final values
-    double const Cc = result.root;                                         // micromol / mol
+    double const Cc = result.root;  // micromol / mol
+
+    // Synchronize FvCB_res, BB_res, Gs, and Assim with the accepted root.
+    check_assim_rate(Cc);
+
     double const Ci = Cc + Assim / gm;                                     // micromol / mol
     double const an_conductance = conductance_limited_assim(Ca, gbw, Gs);  // micromol / m^2 / s
 
