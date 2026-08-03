@@ -28,6 +28,7 @@ canopy_photosynthesis_outputs c3CanAC(
     double const electrons_per_carboxylation,
     double const electrons_per_oxygenation,
     double const exp_id,
+    int const c3_model_type,
     double const gbw_canopy,
     double const gm_at_25,
     double const growth_respiration_fraction,
@@ -92,8 +93,8 @@ canopy_photosynthesis_outputs c3CanAC(
             (lnfun != 0) ? layer_leafN * lnb1 + lnb0 : Vcmax_at_25;
         double constexpr gbw_guess = 1.2;
 
-        // As in BML's c3_leaf_photosynthesis module, use FvCB for the initial
-        // conductance guess and ePhotosynthesis for the coupled iteration.
+        // Use FvCB for the initial conductance guess, then use the selected
+        // biochemical model for the coupled iteration.
         double const gsw_estimate =
             c3photoC(
                 tr_param,
@@ -168,7 +169,7 @@ canopy_photosynthesis_outputs c3CanAC(
                 beta_PSII,
                 et.gbw_molar,
                 exp_id,
-                2);
+                c3_model_type);
 
             return photo.Gs;
         };

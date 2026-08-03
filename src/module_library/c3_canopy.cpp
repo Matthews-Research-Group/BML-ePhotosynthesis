@@ -1,6 +1,7 @@
 #include "c3_temperature_response.h"
 #include "c3CanAC.h"
 #include "c3_canopy.h"
+#include <stdexcept>
 
 using BMLePhoto::c3_canopy;
 
@@ -15,6 +16,7 @@ string_vector c3_canopy::get_inputs()
         "b1",
         "beta_PSII",
         "Catm",
+        "c3_model_type",
         "chil",
         "cosine_zenith_angle",
         "electrons_per_carboxylation",
@@ -88,6 +90,11 @@ string_vector c3_canopy::get_outputs()
 
 void c3_canopy::do_operation() const
 {
+    if (c3_model_type != 1.0 && c3_model_type != 2.0) {
+        throw std::invalid_argument(
+            "c3_model_type must be 1 (FvCB) or 2 (ePhotosynthesis)");
+    }
+
     c3_temperature_response_parameters const tr_param{
         gm_Ha,
         gm_Hd,
@@ -124,6 +131,7 @@ void c3_canopy::do_operation() const
         electrons_per_carboxylation,
         electrons_per_oxygenation,
         exp_id,
+        static_cast<int>(c3_model_type),
         gbw_canopy,
         gm_at_25,
         growth_respiration_fraction,

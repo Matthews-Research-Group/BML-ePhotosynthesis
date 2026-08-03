@@ -20,6 +20,7 @@ canopy_photosynthesis_outputs c3CanAC(
     double const electrons_per_carboxylation,
     double const electrons_per_oxygenation,
     double const exp_id,
+    int const c3_model_type,
     double const gbw_canopy,
     double const gm_at_25,
     double const growth_respiration_fraction,

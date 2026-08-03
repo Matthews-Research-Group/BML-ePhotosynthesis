@@ -9,8 +9,8 @@ namespace BMLePhoto
 /**
  * @class c3_leaf_photosynthesis
  *
- * @brief Uses the method from `c3CanAC()` to calculate leaf photosynthesis
- * parameters for C3 plants
+ * @brief Calculates C3 leaf photosynthesis using either FvCB or
+ * ePhotosynthesis, as selected by `c3_model_type`.
  */
 class c3_leaf_photosynthesis : public direct_module
 {
@@ -30,6 +30,7 @@ class c3_leaf_photosynthesis : public direct_module
           b1{get_input(input_quantities, "b1")},
           beta_PSII{get_input(input_quantities, "beta_PSII")},
           Catm{get_input(input_quantities, "Catm")},
+          c3_model_type{get_input(input_quantities, "c3_model_type")},
           electrons_per_carboxylation{get_input(input_quantities, "electrons_per_carboxylation")},
           electrons_per_oxygenation{get_input(input_quantities, "electrons_per_oxygenation")},
           gbw_canopy{get_input(input_quantities, "gbw_canopy")},
@@ -103,6 +104,7 @@ class c3_leaf_photosynthesis : public direct_module
     double const& b1;
     double const& beta_PSII;
     double const& Catm;
+    double const& c3_model_type;
     double const& electrons_per_carboxylation;
     double const& electrons_per_oxygenation;
     double const& gbw_canopy;

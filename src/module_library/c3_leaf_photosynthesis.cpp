@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include "../math/roots/onedim/dekker.h"
 #include "../math/roots/onedim/fixed_point.h"
 #include "../math/roots/onedim/illinois.h"
@@ -21,6 +22,7 @@ string_vector c3_leaf_photosynthesis::get_inputs()
         "b1",                           // dimensionless
         "beta_PSII",                    // dimensionless (fraction of absorbed light that reaches photosystem II)
         "Catm",                         // micromol / mol
+        "c3_model_type",                // 1: FvCB; 2: ePhotosynthesis
         "electrons_per_carboxylation",  // electron / carboxylation
         "electrons_per_oxygenation",    // electron / oxygenation
         "gbw_canopy",                   // m / s
@@ -87,6 +89,12 @@ string_vector c3_leaf_photosynthesis::get_outputs()
 
 void c3_leaf_photosynthesis::do_operation() const
 {
+    if (c3_model_type != 1.0 && c3_model_type != 2.0) {
+        throw std::invalid_argument(
+            "c3_model_type must be 1 (FvCB) or 2 (ePhotosynthesis)");
+    }
+    int const model_type = static_cast<int>(c3_model_type);
+
     // Combine temperature response parameters
     c3_temperature_response_parameters const tr_param{
         gm_Ha,
@@ -147,7 +155,8 @@ void c3_leaf_photosynthesis::do_operation() const
                 rh, gm_at_25, Gstar_at_25, Kc_at_25, Ko_at_25, Vcmax_at_25,
                 Jmax_at_25, Tp_at_25, RL_at_25, b0, b1, Gs_min, Catm,
                 atmospheric_pressure, O2, StomataWS, electrons_per_carboxylation,
-                electrons_per_oxygenation, beta_PSII, et.gbw_molar, exp_id, 2);
+                electrons_per_oxygenation, beta_PSII, et.gbw_molar, exp_id,
+                model_type);
 
         return photo.Gs;
     };

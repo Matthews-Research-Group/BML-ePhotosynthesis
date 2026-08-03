@@ -21,6 +21,7 @@ class c3_canopy : public direct_module
           b1{get_input(input_quantities, "b1")},
           beta_PSII{get_input(input_quantities, "beta_PSII")},
           Catm{get_input(input_quantities, "Catm")},
+          c3_model_type{get_input(input_quantities, "c3_model_type")},
           chil{get_input(input_quantities, "chil")},
           cosine_zenith_angle{get_input(input_quantities, "cosine_zenith_angle")},
           electrons_per_carboxylation{get_input(input_quantities, "electrons_per_carboxylation")},
@@ -100,6 +101,7 @@ class c3_canopy : public direct_module
     double const& b1;
     double const& beta_PSII;
     double const& Catm;
+    double const& c3_model_type;
     double const& chil;
     double const& cosine_zenith_angle;
     double const& electrons_per_carboxylation;
