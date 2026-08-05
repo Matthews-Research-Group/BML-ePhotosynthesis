@@ -63,8 +63,9 @@ class multilayer_canopy_properties : public direct_module
           nlayers(nlayers),
 
           // Get references to input quantities
-          par_incident_direct{get_input(input_quantities, "par_incident_direct")},
-          par_incident_diffuse{get_input(input_quantities, "par_incident_diffuse")},
+          solar{get_input(input_quantities, "solar")},
+          irradiance_direct_fraction{get_input(input_quantities, "irradiance_direct_fraction")},
+          irradiance_diffuse_fraction{get_input(input_quantities, "irradiance_diffuse_fraction")},
           lai{get_input(input_quantities, "lai")},
           cosine_zenith_angle{get_input(input_quantities, "cosine_zenith_angle")},
           k_diffuse{get_input(input_quantities, "k_diffuse")},
@@ -104,8 +105,9 @@ class multilayer_canopy_properties : public direct_module
     int const nlayers;
 
     // References to input parameters
-    double const& par_incident_direct;
-    double const& par_incident_diffuse;
+    double const& solar;
+    double const& irradiance_direct_fraction;
+    double const& irradiance_diffuse_fraction;
     double const& lai;
     double const& cosine_zenith_angle;
     double const& k_diffuse;

@@ -1,62 +1,73 @@
-#ifndef C3_LEAF_PHOTOSYNTHESIS_H
-#define C3_LEAF_PHOTOSYNTHESIS_H
+#ifndef C3_CANOPY_H
+#define C3_CANOPY_H
 
-#include "../framework/state_map.h"
 #include "../framework/module.h"
+#include "../framework/state_map.h"
 
 namespace BMLePhoto
 {
-/**
- * @class c3_leaf_photosynthesis
- *
- * @brief Calculates C3 leaf photosynthesis using either FvCB or
- * ePhotosynthesis, as selected by `c3_model_type`.
- */
-class c3_leaf_photosynthesis : public direct_module
+class c3_canopy : public direct_module
 {
    public:
-    c3_leaf_photosynthesis(
+    c3_canopy(
         state_map const& input_quantities,
         state_map* output_quantities)
         : direct_module{},
-
-          // Get references to input quantities
           absorbed_longwave{get_input(input_quantities, "absorbed_longwave")},
-          absorbed_ppfd{get_input(input_quantities, "absorbed_ppfd")},
-          absorbed_shortwave{get_input(input_quantities, "absorbed_shortwave")},
-          ambient_temperature{get_input(input_quantities, "temp")},
           atmospheric_pressure{get_input(input_quantities, "atmospheric_pressure")},
+          atmospheric_scattering{get_input(input_quantities, "atmospheric_scattering")},
+          atmospheric_transmittance{get_input(input_quantities, "atmospheric_transmittance")},
           b0{get_input(input_quantities, "b0")},
           b1{get_input(input_quantities, "b1")},
           beta_PSII{get_input(input_quantities, "beta_PSII")},
           Catm{get_input(input_quantities, "Catm")},
           c3_model_type{get_input(input_quantities, "c3_model_type")},
+          chil{get_input(input_quantities, "chil")},
+          cosine_zenith_angle{get_input(input_quantities, "cosine_zenith_angle")},
           electrons_per_carboxylation{get_input(input_quantities, "electrons_per_carboxylation")},
           electrons_per_oxygenation{get_input(input_quantities, "electrons_per_oxygenation")},
+          exp_id{get_input(input_quantities, "exp_id")},
           gbw_canopy{get_input(input_quantities, "gbw_canopy")},
           gm_at_25{get_input(input_quantities, "gm_at_25")},
           gm_Ha{get_input(input_quantities, "gm_Ha")},
           gm_Hd{get_input(input_quantities, "gm_Hd")},
           gm_S{get_input(input_quantities, "gm_S")},
+          growth_respiration_fraction{get_input(input_quantities, "growth_respiration_fraction")},
           Gs_min{get_input(input_quantities, "Gs_min")},
           Gstar_at_25{get_input(input_quantities, "Gstar_at_25")},
           Gstar_Ea{get_input(input_quantities, "Gstar_Ea")},
-          height{get_input(input_quantities, "height")},
+          heightf{get_input(input_quantities, "heightf")},
           Jmax_at_25{get_input(input_quantities, "Jmax_at_25")},
           Jmax_Ea{get_input(input_quantities, "Jmax_Ea")},
+          k_diffuse{get_input(input_quantities, "k_diffuse")},
           Kc_at_25{get_input(input_quantities, "Kc_at_25")},
           Kc_Ea{get_input(input_quantities, "Kc_Ea")},
           Ko_at_25{get_input(input_quantities, "Ko_at_25")},
           Ko_Ea{get_input(input_quantities, "Ko_Ea")},
+          kpLN{get_input(input_quantities, "kpLN")},
+          lai{get_input(input_quantities, "lai")},
+          leaf_reflectance_nir{get_input(input_quantities, "leaf_reflectance_nir")},
+          leaf_reflectance_par{get_input(input_quantities, "leaf_reflectance_par")},
+          leaf_transmittance_nir{get_input(input_quantities, "leaf_transmittance_nir")},
+          leaf_transmittance_par{get_input(input_quantities, "leaf_transmittance_par")},
+          LeafN{get_input(input_quantities, "LeafN")},
           leafwidth{get_input(input_quantities, "leafwidth")},
+          lnb0{get_input(input_quantities, "lnb0")},
+          lnb1{get_input(input_quantities, "lnb1")},
+          lnfun{get_input(input_quantities, "lnfun")},
+          nlayers{get_input(input_quantities, "nlayers")},
           O2{get_input(input_quantities, "O2")},
+          par_energy_content{get_input(input_quantities, "par_energy_content")},
+          par_energy_fraction{get_input(input_quantities, "par_energy_fraction")},
           phi_PSII_0{get_input(input_quantities, "phi_PSII_0")},
           phi_PSII_1{get_input(input_quantities, "phi_PSII_1")},
           phi_PSII_2{get_input(input_quantities, "phi_PSII_2")},
           rh{get_input(input_quantities, "rh")},
           RL_at_25{get_input(input_quantities, "RL_at_25")},
           RL_Ea{get_input(input_quantities, "RL_Ea")},
+          solar{get_input(input_quantities, "solar")},
           StomataWS{get_input(input_quantities, "StomataWS")},
+          temp{get_input(input_quantities, "temp")},
           theta_0{get_input(input_quantities, "theta_0")},
           theta_1{get_input(input_quantities, "theta_1")},
           theta_2{get_input(input_quantities, "theta_2")},
@@ -67,70 +78,76 @@ class c3_leaf_photosynthesis : public direct_module
           Vcmax_at_25{get_input(input_quantities, "Vcmax_at_25")},
           Vcmax_Ea{get_input(input_quantities, "Vcmax_Ea")},
           windspeed{get_input(input_quantities, "windspeed")},
-          exp_id{get_input(input_quantities, "exp_id")},
-
-          // Get pointers to output quantities
-          Assim_op{get_op(output_quantities, "Assim")},
-          Cc_op{get_op(output_quantities, "Cc")},
-          Ci_op{get_op(output_quantities, "Ci")},
-          Cs_op{get_op(output_quantities, "Cs")},
-          EPenman_op{get_op(output_quantities, "EPenman")},
-          EPriestly_op{get_op(output_quantities, "EPriestly")},
-          gbw_op{get_op(output_quantities, "gbw")},
-          GrossAssim_op{get_op(output_quantities, "GrossAssim")},
-          Gs_op{get_op(output_quantities, "Gs")},
-          leaf_temperature_op{get_op(output_quantities, "leaf_temperature")},
-          RHs_op{get_op(output_quantities, "RHs")},
-          RH_canopy_op{get_op(output_quantities, "RH_canopy")},
-          RL_op{get_op(output_quantities, "RL")},
-          Rp_op{get_op(output_quantities, "Rp")},
-          TransR_op{get_op(output_quantities, "TransR")},
-          iteration_C3_Gs_op{get_op(output_quantities, "iteration_C3_Gs")},
-          residual_C3_Gs_op{get_op(output_quantities, "residual_C3_Gs")}
+          windspeed_height{get_input(input_quantities, "windspeed_height")},
+          canopy_assimilation_molar_flux_op{get_op(output_quantities, "canopy_assimilation_molar_flux")},
+          canopy_conductance_op{get_op(output_quantities, "canopy_conductance")},
+          canopy_gross_assimilation_molar_flux_op{get_op(output_quantities, "canopy_gross_assimilation_molar_flux")},
+          canopy_non_photorespiratory_CO2_release_rate_op{get_op(output_quantities, "canopy_non_photorespiratory_CO2_release_molar_flux")},
+          canopy_photorespiration_molar_flux_op{get_op(output_quantities, "canopy_photorespiration_molar_flux")},
+          canopy_transpiration_rate_op{get_op(output_quantities, "canopy_transpiration_rate")},
+          whole_plant_growth_respiration_molar_flux_op{get_op(output_quantities, "whole_plant_growth_respiration_molar_flux")}
     {
     }
     static string_vector get_inputs();
     static string_vector get_outputs();
-    static std::string get_name() { return "c3_leaf_photosynthesis"; }
+    static std::string get_name() { return "c3_canopy"; }
 
    private:
-    // References to input quantities
     double const& absorbed_longwave;
-    double const& absorbed_ppfd;
-    double const& absorbed_shortwave;
-    double const& ambient_temperature;
     double const& atmospheric_pressure;
+    double const& atmospheric_scattering;
+    double const& atmospheric_transmittance;
     double const& b0;
     double const& b1;
     double const& beta_PSII;
     double const& Catm;
     double const& c3_model_type;
+    double const& chil;
+    double const& cosine_zenith_angle;
     double const& electrons_per_carboxylation;
     double const& electrons_per_oxygenation;
+    double const& exp_id;
     double const& gbw_canopy;
     double const& gm_at_25;
     double const& gm_Ha;
     double const& gm_Hd;
     double const& gm_S;
+    double const& growth_respiration_fraction;
     double const& Gs_min;
     double const& Gstar_at_25;
     double const& Gstar_Ea;
-    double const& height;
+    double const& heightf;
     double const& Jmax_at_25;
     double const& Jmax_Ea;
+    double const& k_diffuse;
     double const& Kc_at_25;
     double const& Kc_Ea;
     double const& Ko_at_25;
     double const& Ko_Ea;
+    double const& kpLN;
+    double const& lai;
+    double const& leaf_reflectance_nir;
+    double const& leaf_reflectance_par;
+    double const& leaf_transmittance_nir;
+    double const& leaf_transmittance_par;
+    double const& LeafN;
     double const& leafwidth;
+    double const& lnb0;
+    double const& lnb1;
+    double const& lnfun;
+    double const& nlayers;
     double const& O2;
+    double const& par_energy_content;
+    double const& par_energy_fraction;
     double const& phi_PSII_0;
     double const& phi_PSII_1;
     double const& phi_PSII_2;
     double const& rh;
     double const& RL_at_25;
     double const& RL_Ea;
+    double const& solar;
     double const& StomataWS;
+    double const& temp;
     double const& theta_0;
     double const& theta_1;
     double const& theta_2;
@@ -141,28 +158,16 @@ class c3_leaf_photosynthesis : public direct_module
     double const& Vcmax_at_25;
     double const& Vcmax_Ea;
     double const& windspeed;
-    double const& exp_id;
+    double const& windspeed_height;
 
-    // Pointers to output quantities
-    double* Assim_op;
-    double* Cc_op;
-    double* Ci_op;
-    double* Cs_op;
-    double* EPenman_op;
-    double* EPriestly_op;
-    double* gbw_op;
-    double* GrossAssim_op;
-    double* Gs_op;
-    double* leaf_temperature_op;
-    double* RHs_op;
-    double* RH_canopy_op;
-    double* RL_op;
-    double* Rp_op;
-    double* TransR_op;
-    double* iteration_C3_Gs_op;
-    double* residual_C3_Gs_op;
+    double* canopy_assimilation_molar_flux_op;
+    double* canopy_conductance_op;
+    double* canopy_gross_assimilation_molar_flux_op;
+    double* canopy_non_photorespiratory_CO2_release_rate_op;
+    double* canopy_photorespiration_molar_flux_op;
+    double* canopy_transpiration_rate_op;
+    double* whole_plant_growth_respiration_molar_flux_op;
 
-    // Main operation
     void do_operation() const;
 };
 

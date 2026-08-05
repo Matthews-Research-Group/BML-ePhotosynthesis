@@ -10,9 +10,15 @@ ABS_EPHOTO_PATH := $(abspath $(ephoto_path)/build)
 #conda_path := $(shell conda env list | grep ephoto | awk '{print $$NF}')
 #
 # 2. Compiler Flags
-PKG_CPPFLAGS += -I$(ephoto_path)/include -I$(ephoto_path)/build 
-#PKG_CPPFLAGS += -I$(CURDIR)/../inc
-PKG_CPPFLAGS += -DR_NO_REMAP 
+PKG_CPPFLAGS += -I$(ephoto_path)/include -I$(ephoto_path)/build
+
+# Prefer the system Boost installation by default. Set
+# BML_USE_VENDORED_BOOST=1 to use the copy bundled in this package.
+ifeq ($(BML_USE_VENDORED_BOOST),1)
+PKG_CPPFLAGS += -I$(PARENT_DIR)/inc
+endif
+
+PKG_CPPFLAGS += -DR_NO_REMAP
 PKG_CXXFLAGS += -O3 -g -Wall -ggdb3 -std=c++17
 
 # 3. Try to get sundials paths from pkg-config
@@ -27,7 +33,7 @@ PKG_LIBS += $(if $(PKG_CONFIG_LIB), $(PKG_CONFIG_LIB), $(BREW_LIB))
 PKG_LIBS += -Wl,-rpath,$(ABS_EPHOTO_PATH) -L$(ABS_EPHOTO_PATH) -lEPhotosynthesis 
 
 # 5. Source/Object setup
-SOURCES = $(wildcard *.cpp module_library/*.cpp framework/*.cpp framework/ode_solver_library/*.cpp framework/utils/*.cpp)
+SOURCES = $(wildcard *.cpp module_library/*.cpp module_library/core/*.cpp framework/*.cpp framework/ode_solver_library/*.cpp framework/utils/*.cpp)
 OBJECTS = $(SOURCES:.cpp=.o)
 SHLIB = BMLePhoto.so
 
@@ -42,7 +48,7 @@ all: $(SHLIB)
 
 # --- Dependency Generation Logic ---
 DEPDIR := .deps
-DEPSUBDIRS = $(DEPDIR)/module_library $(DEPDIR)/framework $(DEPDIR)/framework/ode_solver_library $(DEPDIR)/framework/utils
+DEPSUBDIRS = $(DEPDIR)/module_library $(DEPDIR)/module_library/core $(DEPDIR)/framework $(DEPDIR)/framework/ode_solver_library $(DEPDIR)/framework/utils
 
 DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.d
 

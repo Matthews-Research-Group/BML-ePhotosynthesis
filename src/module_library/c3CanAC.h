@@ -1,0 +1,58 @@
+#ifndef C3CANAC_H
+#define C3CANAC_H
+
+#include "canopy_photosynthesis_outputs.h"
+#include "c3_temperature_response.h"
+
+canopy_photosynthesis_outputs c3CanAC(
+    c3_temperature_response_parameters const tr_param,
+    double const absorbed_longwave,
+    double const ambient_temperature,
+    double const atmospheric_pressure,
+    double const atmospheric_scattering,
+    double const atmospheric_transmittance,
+    double const b0,
+    double const b1,
+    double const beta_PSII,
+    double const Catm,
+    double const chil,
+    double const cosine_zenith_angle,
+    double const electrons_per_carboxylation,
+    double const electrons_per_oxygenation,
+    double const exp_id,
+    int const c3_model_type,
+    double const gbw_canopy,
+    double const gm_at_25,
+    double const growth_respiration_fraction,
+    double const Gs_min,
+    double const Gstar_at_25,
+    double const heightf,
+    double const Jmax_at_25,
+    double const k_diffuse,
+    double const Kc_at_25,
+    double const Ko_at_25,
+    double const kpLN,
+    double const LAI,
+    double const leaf_reflectance_nir,
+    double const leaf_reflectance_par,
+    double const leaf_transmittance_nir,
+    double const leaf_transmittance_par,
+    double const leaf_width,
+    double const leafN,
+    double const lnb0,
+    double const lnb1,
+    double const o2,
+    double const par_energy_content,
+    double const par_energy_fraction,
+    double const RH,
+    double const RL_at_25,
+    double const solarR,
+    double const StomataWS,
+    double const Tp_at_25,
+    double Vcmax_at_25,
+    double const WindSpeed,
+    double const WindSpeedHeight,
+    int const lnfun,
+    int const nlayers);
+
+#endif
