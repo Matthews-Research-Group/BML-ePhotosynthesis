@@ -1,5 +1,8 @@
 #include <algorithm>                      // for std::min
 #include <cmath>                          // for pow, sqrt
+#include <map>
+#include <sstream>
+#include "ephoto_ci_bracket.h"
 #include <limits>                         // for std::numeric_limits
 #include "../framework/constants.h"       // for dr_stomata, dr_boundary
 #include "ball_berry_gs.h"                // for ball_berry_gs
@@ -118,11 +121,23 @@ photosynthesis_outputs c3photoC(
         double Rp{0.0};
         double penalty{0.0};
 
+        double failedCi = std::numeric_limits<double>::quiet_NaN();
+        ephoto_status failedStatus = ephoto_status::invalid_output;
+
         // Solve directly for Ci. This retains BML's more stable ePhotosynthesis
         // coupling while using the current BioCro conductance interfaces.
         auto check_assim_rate =
-            [=, &ephoto_result, &BB_res, &Gs, &Assim, &Vc, &Rp, &penalty](double Ci) {
+            [=, &ephoto_result, &BB_res, &Gs, &Assim, &Vc, &Rp, &penalty,
+             &failedCi, &failedStatus](double Ci) {
                 ephoto_result = assim_ephoto(Tleaf, ephoto_ppfd, Ci, exp_id);
+                if (ephoto_result.status != ephoto_status::success ||
+                    !std::isfinite(ephoto_result.A) || !std::isfinite(ephoto_result.Vc) ||
+                    !std::isfinite(ephoto_result.PR) || !std::isfinite(ephoto_result.penalty)) {
+                    failedCi = Ci;
+                    failedStatus = ephoto_result.status == ephoto_status::success
+                        ? ephoto_status::invalid_output : ephoto_result.status;
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
                 Assim = std::max(0.0, ephoto_result.A) - RL;
                 Vc = ephoto_result.Vc;
                 Rp = ephoto_result.PR;
@@ -141,7 +156,12 @@ photosynthesis_outputs c3photoC(
                 Gs = BB_res.gsw;
                 double const Gt =
                     sequential_conductance({gbw / dr_boundary, Gs / dr_stomata});
-                return Assim - Gt * (Ca - Ci);
+                const double residual = Assim - Gt * (Ca - Ci);
+                if (!std::isfinite(residual)) {
+                    failedCi = Ci;
+                    failedStatus = ephoto_status::invalid_output;
+                }
+                return residual;
             };
 
         double const A_min =
@@ -154,30 +174,66 @@ photosynthesis_outputs c3photoC(
             Ca - A_min * (dr_boundary / gbw + dr_stomata / b0_adj);
         double constexpr Ci_min = 1e-6;
 
-        root_finding::dekker solver{100, 1e-8, 1e-10};
-        root_finding::result_t result =
-            solver.solve(check_assim_rate, 0.718 * Ca, Ci_min, Ci_max * 1.01);
-
-        if (!root_finding::is_successful(result.flag)) {
-            root_finding::illinois fallback{200, 1e-8, 1e-10};
-            auto fallback_result =
-                fallback.solve(check_assim_rate, Ci_min, Ci_max * 1.01);
-            if (!root_finding::is_successful(fallback_result.flag)) {
-                throw std::runtime_error(
-                    "ePhotosynthesis Ci solver failed: " +
-                    root_finding::flag_message(fallback_result.flag));
+        // Cache both valid and failed trials; bracket expansion and the root
+        // algorithms often revisit endpoints, each of which requires a full ODE run.
+        std::map<double, double> residuals;
+        auto cached_residual = [&](double Ci) {
+            if (!std::isfinite(Ci) || Ci < Ci_min || Ci > Ci_max * 1.01) {
+                throw std::runtime_error("Ci trial is outside the finite search interval");
             }
-            result = fallback_result;
+            const auto found = residuals.find(Ci);
+            if (found != residuals.end()) return found->second;
+            const double value = check_assim_rate(Ci);
+            residuals.emplace(Ci, value);
+            return value;
+        };
+        auto valid_residual = [&](double Ci) {
+            const double value = cached_residual(Ci);
+            if (!std::isfinite(value)) {
+                throw std::runtime_error("ODE evaluation failed inside the Ci bracket");
+            }
+            return value;
+        };
+
+        root_finding::result_t result{};
+        try {
+            const auto bracket = bracket_ephoto_ci(
+                cached_residual, 0.718 * Ca, Ci_min, Ci_max * 1.01);
+            if (bracket.lower == bracket.upper) {
+                result = {bracket.lower, valid_residual(bracket.lower), 0,
+                          root_finding::Flag::residual_zero};
+            } else {
+                root_finding::dekker solver{100, 1e-8, 1e-10};
+                result = solver.solve(valid_residual, bracket.lower, bracket.upper);
+                if (!root_finding::is_successful(result.flag)) {
+                    root_finding::illinois fallback{200, 1e-8, 1e-10};
+                    result = fallback.solve(valid_residual, bracket.lower, bracket.upper);
+                }
+                if (!root_finding::is_successful(result.flag)) {
+                    throw std::runtime_error(root_finding::flag_message(result.flag));
+                }
+            }
+            // Cached residuals do not update the output side effects. Synchronize
+            // every output with the accepted root and reject a failed final run.
+            result.residual = check_assim_rate(result.root);
+            if (!std::isfinite(result.residual)) {
+                throw std::runtime_error("final Ci evaluation failed");
+            }
+        } catch (const std::runtime_error& error) {
+            std::ostringstream message;
+            message << "ePhotosynthesis Ci solver failed: " << error.what()
+                    << " Ca=" << Ca << " light=" << ephoto_ppfd << " temperature=" << Tleaf
+                    << " exp_id=" << exp_id;
+            if (std::isfinite(failedCi)) {
+                message << " failed_Ci=" << failedCi
+                        << " ode_status=" << ephoto_status_message(failedStatus);
+            }
+            throw std::runtime_error(message.str());
         }
 
         // ePhotosynthesis uses Ci directly and does not expose a distinct Cc.
         double const Ci = result.root;
         double const Cc = Ci;
-
-        // Dekker may return a stored bracket point that was not the most
-        // recently evaluated point. Re-evaluate the accepted root so all
-        // side-effect outputs correspond to Ci.
-        check_assim_rate(Ci);
 
         double const an_conductance = conductance_limited_assim(Ca, gbw, Gs);
 
