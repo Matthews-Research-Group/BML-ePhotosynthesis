@@ -138,7 +138,7 @@ photosynthesis_outputs c3photoC(
                         ? ephoto_status::invalid_output : ephoto_result.status;
                     return std::numeric_limits<double>::quiet_NaN();
                 }
-                Assim = std::max(0.0, ephoto_result.A) - RL;
+                Assim = ephoto_result.A - RL;
                 Vc = ephoto_result.Vc;
                 Rp = ephoto_result.PR;
                 penalty = ephoto_result.penalty;
