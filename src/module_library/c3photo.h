@@ -3,6 +3,7 @@
 
 #include "photosynthesis_outputs.h"   // for photosynthesis_outputs
 #include "c3_temperature_response.h"  // for c3_temperature_response_parameters
+#include "ephoto_ci_context.h"
 
 photosynthesis_outputs c3photoC(
     c3_temperature_response_parameters const tr_param,
@@ -30,7 +31,8 @@ photosynthesis_outputs c3photoC(
     double const beta_PSII,
     double const gbw,
     double const exp_id,
-    int    const model_type);
+    int    const model_type,
+    ephoto_ci_context* const ephoto_context = nullptr);
 
 double solc(double LeafT);
 double solo(double LeafT);

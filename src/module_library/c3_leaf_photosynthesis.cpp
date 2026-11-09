@@ -132,8 +132,9 @@ void c3_leaf_photosynthesis::do_operation() const
 
     photosynthesis_outputs photo;
     energy_balance_outputs et;
+    ephoto_ci_context ci_context;
 
-    auto calculate_gs = [=, &photo, &et](double current_gs) {
+    auto calculate_gs = [=, &photo, &et, &ci_context](double current_gs) {
         // 2. Solve Energy Balance with current g_s
         et = leaf_energy_balance(
             absorbed_longwave,
@@ -156,7 +157,7 @@ void c3_leaf_photosynthesis::do_operation() const
                 Jmax_at_25, Tp_at_25, RL_at_25, b0, b1, Gs_min, Catm,
                 atmospheric_pressure, O2, StomataWS, electrons_per_carboxylation,
                 electrons_per_oxygenation, beta_PSII, et.gbw_molar, exp_id,
-                model_type);
+                model_type, &ci_context);
 
         return photo.Gs;
     };

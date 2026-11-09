@@ -15,9 +15,10 @@ struct ephoto_ci_bracket {
 
 template <typename Function>
 ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
-                                     double minimum, double maximum) {
+                                     double minimum, double maximum,
+                                     double initial_radius = 0.0) {
     if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
-        !std::isfinite(initial)) {
+        !std::isfinite(initial) || !std::isfinite(initial_radius) || initial_radius < 0.0) {
         throw std::runtime_error("invalid Ci search interval");
     }
     initial = std::max(minimum, std::min(initial, maximum));
@@ -30,7 +31,8 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
     double upperLimit = maximum;
     bool lowerBlocked = false;
     bool upperBlocked = false;
-    double radius = std::max(0.05 * std::abs(initial), 1e-6);
+    double radius = initial_radius > 0.0 ? initial_radius :
+        std::max(0.05 * std::abs(initial), 1e-6);
     const bool lowerFirst = lower.y > 0.0;
 
     // If a trial fails, approach it from the valid side. Never construct a

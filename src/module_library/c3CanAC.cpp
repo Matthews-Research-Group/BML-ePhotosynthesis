@@ -127,6 +127,7 @@ canopy_photosynthesis_outputs c3CanAC(
 
         energy_balance_outputs et;
         photosynthesis_outputs photo;
+        ephoto_ci_context ci_context;
 
         auto calculate_gs = [&](double current_gs) {
             et = leaf_energy_balance(
@@ -169,7 +170,8 @@ canopy_photosynthesis_outputs c3CanAC(
                 beta_PSII,
                 et.gbw_molar,
                 exp_id,
-                c3_model_type);
+                c3_model_type,
+                &ci_context);
 
             return photo.Gs;
         };
