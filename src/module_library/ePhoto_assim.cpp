@@ -4,6 +4,7 @@
 #include <sstream>
 #include <vector>
 #include <iterator>
+#include <memory>
 #include <boost/algorithm/string_regex.hpp>
 #include <boost/regex.hpp>
 #include "cxxopts.hpp"
@@ -36,7 +37,8 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
         readFile1(evn_input, inputs);
         readFile1(atpcost, inputs);
 
-        Variables *theVars = new Variables();
+        std::unique_ptr<Variables> varsOwner(new Variables());
+        Variables *theVars = varsOwner.get();
         // Use the phosphate-pool scaling fitted for the LD11 calibration.
         theVars->PS_scaling_factor = 0.982961287214682;
 
@@ -56,7 +58,7 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
 //which enzymes are being scaled
 //        theVars->sensitivity_sf = enzyme_sf;
 
-        Driver *maindriver;
+        std::unique_ptr<Driver> maindriver;
        
 //        std::cout<< "leafT is "<<LeafT<<std::endl;
 //        std::cout<< "PAR is "<<theVars->TestLi<<std::endl;
@@ -64,17 +66,19 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
 //        std::cout<< "alpha2 is"<<theVars->alpha2<<std::endl;
 //        std::cout<< "JMAX is"<<theVars->EnzymeAct.at("Jmax")<<std::endl;
 
-        maindriver = new EPSDriver(theVars, begintime, stepsize, stoptime, maxSubSteps, abstol, reltol, 1, 1, LeafT);
+        maindriver.reset(new EPSDriver(theVars, begintime, stepsize, stoptime, maxSubSteps, abstol, reltol, 1, 1, LeafT));
 
         std::vector<double> ResultRate = maindriver->run();
 
-       if (theVars != nullptr) {
-           maindriver->inputVars= nullptr;
-           delete theVars;
-       }   
-       delete maindriver;
-       
-       ephoto_outputs result; 
+       ephoto_outputs result;
+       if (maindriver->lastRunStatus == Driver::RunStatus::success) {
+           result.status = ephoto_status::success;
+       } else if (maindriver->lastRunStatus == Driver::RunStatus::timedOut) {
+           result.status = ephoto_status::timed_out;
+       } else if (maindriver->lastRunStatus == Driver::RunStatus::retriesExhausted) {
+           result.status = ephoto_status::retries_exhausted;
+       }
+       maindriver->inputVars = nullptr;
        result.A       = ResultRate[0];
        result.Vc      = ResultRate[1];
        result.PR      = ResultRate[2]; //photorepiration
