@@ -53,7 +53,8 @@ photosynthesis_outputs c3photoC(
     double const beta_PSII,                    // dimensionless (fraction of absorbed light that reaches photosystem II)
     double const gbw,                          // mol / m^2 / s
     double const exp_id,                       // experiment identifier
-    int const model_type                       // 1: FvCB; 2: ePhotosynthesis
+    int const model_type,                      // 1: FvCB; 2: ePhotosynthesis
+    ephoto_ci_context* const ephoto_context
 )
 {
     // Define infinity
@@ -113,6 +114,8 @@ photosynthesis_outputs c3photoC(
     // FvCB calculation because the ePhotosynthesis system is numerically stiff.
     double const ephoto_ppfd = absorbed_ppfd / 0.85;
     if (model_type == 2 && ephoto_ppfd >= 5.0) {
+        ephoto_ci_context local_context;
+        auto& context = ephoto_context ? *ephoto_context : local_context;
         ephoto_outputs ephoto_result;
         stomata_outputs BB_res;
         double Gs{1e3};
@@ -128,8 +131,9 @@ photosynthesis_outputs c3photoC(
         // coupling while using the current BioCro conductance interfaces.
         auto check_assim_rate =
             [=, &ephoto_result, &BB_res, &Gs, &Assim, &Vc, &Rp, &penalty,
-             &failedCi, &failedStatus](double Ci) {
-                ephoto_result = assim_ephoto(Tleaf, ephoto_ppfd, Ci, exp_id);
+             &failedCi, &failedStatus, &context](double Ci) {
+                ephoto_result = context.evaluate(Tleaf, ephoto_ppfd, Ci, exp_id,
+                    [&]() { return assim_ephoto(Tleaf, ephoto_ppfd, Ci, exp_id); });
                 if (ephoto_result.status != ephoto_status::success ||
                     !std::isfinite(ephoto_result.A) || !std::isfinite(ephoto_result.Vc) ||
                     !std::isfinite(ephoto_result.PR) || !std::isfinite(ephoto_result.penalty)) {
@@ -195,10 +199,33 @@ photosynthesis_outputs c3photoC(
             return value;
         };
 
-        root_finding::result_t result{};
-        try {
-            const auto bracket = bracket_ephoto_ci(
-                cached_residual, 0.718 * Ca, Ci_min, Ci_max * 1.01);
+        auto solve_from = [&](double initial, bool warm) {
+            const double maximum = Ci_max * 1.01;
+            initial = std::max(Ci_min, std::min(initial, maximum));
+            double lower = Ci_min;
+            double upper = maximum;
+            // A failed warm search must not let a cold retry bridge any known
+            // invalid residual. Search the connected interval around its seed.
+            for (const auto& trial : residuals) {
+                if (!std::isfinite(trial.second)) {
+                    if (trial.first < initial) lower = std::max(lower, trial.first);
+                    if (trial.first > initial) upper = std::min(upper, trial.first);
+                }
+            }
+            double radius = 0.0;
+            if (warm) {
+                // Use the previous local slope only to size the first bracket
+                // trial. Actual residuals must still establish a valid bracket.
+                radius = std::max(1e-4 * std::abs(initial), 1e-6);
+                const double value = cached_residual(initial);
+                if (std::isfinite(value) && std::isfinite(context.previous_slope) &&
+                    std::abs(context.previous_slope) > 1e-12) {
+                    radius = std::max(radius, std::min(0.05 * std::abs(initial),
+                        1.5 * std::abs(value / context.previous_slope)));
+                }
+            }
+            const auto bracket = bracket_ephoto_ci(cached_residual, initial, lower, upper, radius);
+            root_finding::result_t result{};
             if (bracket.lower == bracket.upper) {
                 result = {bracket.lower, valid_residual(bracket.lower), 0,
                           root_finding::Flag::residual_zero};
@@ -213,11 +240,31 @@ photosynthesis_outputs c3photoC(
                     throw std::runtime_error(root_finding::flag_message(result.flag));
                 }
             }
-            // Cached residuals do not update the output side effects. Synchronize
-            // every output with the accepted root and reject a failed final run.
+            // Restore all outputs at the accepted root, using the full cached
+            // biochemical result. Conductance is recomputed for current inputs.
             result.residual = check_assim_rate(result.root);
             if (!std::isfinite(result.residual)) {
                 throw std::runtime_error("final Ci evaluation failed");
+            }
+            return result;
+        };
+
+        root_finding::result_t result{};
+        try {
+            const double cold_initial = 0.718 * Ca;
+            const bool use_previous = std::isfinite(context.previous_ci) &&
+                context.previous_ci > Ci_min && context.previous_ci < Ci_max * 1.01 &&
+                context.previous_ci != cold_initial;
+            if (use_previous) {
+                try {
+                    result = solve_from(context.previous_ci, true);
+                } catch (const std::runtime_error&) {
+                    // A previous solution is only a hint, never a substitute
+                    // for a valid bracket and successful current root solve.
+                    result = solve_from(cold_initial, false);
+                }
+            } else {
+                result = solve_from(cold_initial, false);
             }
         } catch (const std::runtime_error& error) {
             std::ostringstream message;
@@ -234,6 +281,20 @@ photosynthesis_outputs c3photoC(
         // ePhotosynthesis uses Ci directly and does not expose a distinct Cc.
         double const Ci = result.root;
         double const Cc = Ci;
+        context.previous_slope = std::numeric_limits<double>::quiet_NaN();
+        double nearest = std::numeric_limits<double>::infinity();
+        const double minimum_distance = std::max(1e-3, 1e-5 * std::abs(Ci));
+        for (const auto& trial : residuals) {
+            const double distance = std::abs(trial.first - Ci);
+            if (std::isfinite(trial.second) && distance >= minimum_distance && distance < nearest) {
+                const double slope = (trial.second - result.residual) / (trial.first - Ci);
+                if (std::isfinite(slope)) {
+                    context.previous_slope = slope;
+                    nearest = distance;
+                }
+            }
+        }
+        context.previous_ci = Ci;
 
         double const an_conductance = conductance_limited_assim(Ca, gbw, Gs);
 
