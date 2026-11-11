@@ -133,7 +133,10 @@ photosynthesis_outputs c3photoC(
             [=, &ephoto_result, &BB_res, &Gs, &Assim, &Vc, &Rp, &penalty,
              &failedCi, &failedStatus, &context](double Ci) {
                 ephoto_result = context.evaluate(Tleaf, ephoto_ppfd, Ci, exp_id,
-                    [&]() { return assim_ephoto(Tleaf, ephoto_ppfd, Ci, exp_id); });
+                    [&]() {
+                        return assim_ephoto(Tleaf, ephoto_ppfd, Ci, exp_id,
+                            context.reuse_biochemical_state ? &context.biochemical_state : nullptr);
+                    });
                 if (ephoto_result.status != ephoto_status::success ||
                     !std::isfinite(ephoto_result.A) || !std::isfinite(ephoto_result.Vc) ||
                     !std::isfinite(ephoto_result.PR) || !std::isfinite(ephoto_result.penalty)) {

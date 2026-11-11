@@ -22,7 +22,7 @@ using namespace ePhotosynthesis;
 using namespace ePhotosynthesis::drivers;
 using namespace ePhotosynthesis::modules;
 
-ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
+ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci, double exp_id, ephoto_state* state)
 {
         bool record    = true;//turn this on to calculate penalties
         bool runBioCro = true;//turn this on to NOT substract the penalties from A
@@ -68,7 +68,18 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci,double exp_id)
 
         maindriver.reset(new EPSDriver(theVars, begintime, stepsize, stoptime, maxSubSteps, abstol, reltol, 1, 1, LeafT));
 
+        if (state && state->nearby(LeafT, PAR, Ci, exp_id)) {
+            maindriver->initialState = state->values;
+        }
         std::vector<double> ResultRate = maindriver->run();
+        if (state && maindriver->lastRunStatus == Driver::RunStatus::success &&
+            maindriver->finalStateReusable && ResultRate[3] < 0.01) {
+            state->values = std::move(maindriver->finalState);
+            state->temperature = LeafT;
+            state->ppfd = PAR;
+            state->ci = Ci;
+            state->experiment = exp_id;
+        }
 
        ephoto_outputs result;
        if (maindriver->lastRunStatus == Driver::RunStatus::success) {

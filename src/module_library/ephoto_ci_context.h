@@ -10,6 +10,9 @@
 // Owned by one leaf conductance solve. Input files and biochemical settings
 // remain fixed for this scope; no results are shared across leaves or timesteps.
 struct ephoto_ci_context {
+    ephoto_state biochemical_state;
+    // May be disabled for a matched cold-start comparison.
+    bool reuse_biochemical_state = true;
     double previous_ci = std::numeric_limits<double>::quiet_NaN();
     double previous_slope = std::numeric_limits<double>::quiet_NaN();
 
