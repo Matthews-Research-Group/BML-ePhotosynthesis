@@ -6,6 +6,11 @@
 #include <stdexcept>
 #include "../math/roots/onedim/roots.h"
 
+// Shared by bracket acceptance and both ePhoto Ci root solvers. The root
+// library uses the absolute value for residual and interval convergence.
+constexpr double ephoto_ci_abs_tolerance = 1e-3;
+constexpr double ephoto_ci_rel_tolerance = 1e-6;
+
 // Expand around a useful estimate instead of evaluating the near-zero bound
 // unconditionally. A nonfinite residual marks an invalid ODE evaluation.
 struct ephoto_ci_bracket {
@@ -54,8 +59,8 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
     };
     for (int expansion = 0; expansion < 32; ++expansion) {
         for (int side = 0; side < 2; ++side) {
-            if (std::abs(lower.y) <= 1e-8) return {lower.x, lower.x};
-            if (std::abs(upper.y) <= 1e-8) return {upper.x, upper.x};
+            if (std::abs(lower.y) <= ephoto_ci_abs_tolerance) return {lower.x, lower.x};
+            if (std::abs(upper.y) <= ephoto_ci_abs_tolerance) return {upper.x, upper.x};
             if (root_finding::opposite_signs(lower.y, upper.y)) {
                 return {lower.x, upper.x};
             }
@@ -68,8 +73,8 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
         }
         radius = std::min(radius * 2.0, maximum - minimum);
     }
-    if (std::abs(lower.y) <= 1e-8) return {lower.x, lower.x};
-    if (std::abs(upper.y) <= 1e-8) return {upper.x, upper.x};
+    if (std::abs(lower.y) <= ephoto_ci_abs_tolerance) return {lower.x, lower.x};
+    if (std::abs(upper.y) <= ephoto_ci_abs_tolerance) return {upper.x, upper.x};
     if (root_finding::opposite_signs(lower.y, upper.y)) return {lower.x, upper.x};
     throw std::runtime_error("no valid sign-changing Ci bracket found");
 }

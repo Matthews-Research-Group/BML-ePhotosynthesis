@@ -234,10 +234,10 @@ photosynthesis_outputs c3photoC(
                 result = {bracket.lower, valid_residual(bracket.lower), 0,
                           root_finding::Flag::residual_zero};
             } else {
-                root_finding::dekker solver{100, 1e-8, 1e-10};
+                root_finding::dekker solver{100, ephoto_ci_abs_tolerance, ephoto_ci_rel_tolerance};
                 result = solver.solve(valid_residual, bracket.lower, bracket.upper);
                 if (!root_finding::is_successful(result.flag)) {
-                    root_finding::illinois fallback{200, 1e-8, 1e-10};
+                    root_finding::illinois fallback{200, ephoto_ci_abs_tolerance, ephoto_ci_rel_tolerance};
                     result = fallback.solve(valid_residual, bracket.lower, bracket.upper);
                 }
                 if (!root_finding::is_successful(result.flag)) {
