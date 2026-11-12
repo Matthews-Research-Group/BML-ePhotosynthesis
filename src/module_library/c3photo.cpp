@@ -114,6 +114,7 @@ photosynthesis_outputs c3photoC(
     // FvCB calculation because the ePhotosynthesis system is numerically stiff.
     double const ephoto_ppfd = absorbed_ppfd / 0.85;
     if (model_type == 2 && ephoto_ppfd >= 5.0) {
+        ephoto_ci_diagnostic_scope diagnostic_scope;
         ephoto_ci_context local_context;
         auto& context = ephoto_context ? *ephoto_context : local_context;
         ephoto_outputs ephoto_result;

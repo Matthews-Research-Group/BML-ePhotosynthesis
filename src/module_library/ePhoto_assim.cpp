@@ -16,6 +16,7 @@
 #include "drivers/drivers.hpp"
 #include "Variables.hpp"
 #include "ePhoto_assim.h"
+#include "ephoto_runtime_diagnostics.h"
 
 const boost::regex token("\\s+");
 using namespace ePhotosynthesis;
@@ -24,6 +25,16 @@ using namespace ePhotosynthesis::modules;
 
 ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci, double exp_id, ephoto_state* state)
 {
+        auto& diagnostics = ephoto_runtime();
+        ephoto_runtime_diagnostics::clock::time_point diagnostic_started;
+        if (diagnostics.enabled()) {
+            diagnostic_started = ephoto_runtime_diagnostics::clock::now();
+            ++diagnostics.ode_started;
+            diagnostics.profile = exp_id; diagnostics.ci = Ci;
+            diagnostics.ppfd = PAR; diagnostics.temperature = LeafT;
+            if (state && !state->values.empty()) ++diagnostics.seed_available;
+            diagnostics.report();
+        }
         bool record    = true;//turn this on to calculate penalties
         bool runBioCro = true;//turn this on to NOT substract the penalties from A
         double stoptime = 5000.0, begintime=0.0, stepsize=0.5;
@@ -70,6 +81,7 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci, double exp_id, 
 
         if (state && state->nearby(LeafT, PAR, Ci, exp_id)) {
             maindriver->initialState = state->values;
+            if (diagnostics.enabled()) ++diagnostics.seed_requested;
         }
         std::vector<double> ResultRate = maindriver->run();
         if (state && maindriver->lastRunStatus == Driver::RunStatus::success &&
@@ -79,6 +91,7 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci, double exp_id, 
             state->ppfd = PAR;
             state->ci = Ci;
             state->experiment = exp_id;
+            if (diagnostics.enabled()) ++diagnostics.seed_saved;
         }
 
        ephoto_outputs result;
@@ -94,6 +107,25 @@ ephoto_outputs assim_ephoto(double LeafT, double PAR, double Ci, double exp_id, 
        result.Vc      = ResultRate[1];
        result.PR      = ResultRate[2]; //photorepiration
        result.penalty = ResultRate[3];
+       if (diagnostics.enabled()) {
+           const double seconds = std::chrono::duration<double>(
+               ephoto_runtime_diagnostics::clock::now() - diagnostic_started).count();
+           ++diagnostics.ode_completed;
+           if (result.status != ephoto_status::success) ++diagnostics.ode_failed;
+           if (seconds > 5.0) ++diagnostics.slow_calls;
+           if (maindriver->usedInitialState) ++diagnostics.seed_used;
+           diagnostics.ode_seconds += seconds;
+           diagnostics.max_ode_seconds = std::max(diagnostics.max_ode_seconds, seconds);
+           diagnostics.last_ode_seconds = seconds;
+           diagnostics.last_steps = maindriver->totalInternalSteps;
+           diagnostics.last_rhs = maindriver->totalRhsEvaluations;
+           diagnostics.internal_steps += maindriver->totalInternalSteps;
+           diagnostics.rhs_evaluations += maindriver->totalRhsEvaluations;
+           diagnostics.assimilation = result.A; diagnostics.penalty = result.penalty;
+           diagnostics.last_profile = exp_id; diagnostics.last_ci = Ci;
+           diagnostics.last_ppfd = PAR; diagnostics.last_temperature = LeafT;
+           diagnostics.report();
+       }
        return result;
 }
 

@@ -6,6 +6,7 @@
 #include <map>
 #include <tuple>
 #include "ePhoto_assim.h"
+#include "ephoto_runtime_diagnostics.h"
 
 // Owned by one leaf conductance solve. Input files and biochemical settings
 // remain fixed for this scope; no results are shared across leaves or timesteps.
@@ -16,9 +17,21 @@ struct ephoto_ci_context {
     double previous_ci = std::numeric_limits<double>::quiet_NaN();
     double previous_slope = std::numeric_limits<double>::quiet_NaN();
 
+    ~ephoto_ci_context() {
+        if (diagnostics_used) ++ephoto_runtime().leaf_completed;
+    }
+
     template <typename Evaluate>
     ephoto_outputs evaluate(double temperature, double ppfd, double ci,
                             double experiment, Evaluate&& calculate) {
+        auto& diagnostics = ephoto_runtime();
+        if (diagnostics.enabled()) {
+            if (!diagnostics_used) {
+                diagnostics_used = true;
+                ++diagnostics.leaf_started;
+            }
+            ++diagnostics.cache_requests;
+        }
         // NaN cannot be used safely in an ordered cache key. Preserve the
         // evaluator's existing handling of invalid inputs instead.
         if (!std::isfinite(temperature) || !std::isfinite(ppfd) ||
@@ -27,7 +40,10 @@ struct ephoto_ci_context {
         }
         const auto key = std::make_tuple(temperature, ppfd, ci, experiment);
         const auto found = results.find(key);
-        if (found != results.end()) return found->second;
+        if (found != results.end()) {
+            if (diagnostics.enabled()) ++diagnostics.cache_hits;
+            return found->second;
+        }
         const auto value = calculate();
         // Bound storage even when a difficult conductance solve tries many
         // temperatures. Per-Ci-solve residual/failure tracking is independent.
@@ -37,6 +53,7 @@ struct ephoto_ci_context {
     }
 
 private:
+    bool diagnostics_used = false;
     std::map<std::tuple<double, double, double, double>, ephoto_outputs> results;
 };
 
