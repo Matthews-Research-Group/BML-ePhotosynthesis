@@ -61,7 +61,8 @@ canopy_photosynthesis_outputs c3CanAC(
     double const WindSpeed,
     double const WindSpeedHeight,
     int const lnfun,
-    int const nlayers)
+    int const nlayers,
+    ephoto_canopy_history* history)
 {
     core::atmosphere_light_scattering const light_model(
         cosine_zenith_angle,
@@ -84,11 +85,33 @@ canopy_photosynthesis_outputs c3CanAC(
     core::canopy_light light_dist =
         core::canopy_light::from_solar(solarR, light_model, params);
 
+    const auto configuration=ephoto_hint_configuration(tr_param, {exp_id,double(c3_model_type),
+        b0,b1,Gs_min,Catm,RL_at_25,gm_at_25,Gstar_at_25,Kc_at_25,Ko_at_25,
+        Vcmax_at_25,Jmax_at_25,Tp_at_25,StomataWS,leaf_width,kpLN,leafN,double(lnfun)});
+    const bool history_compatible=history && history->layers==nlayers &&
+        std::abs(history->lai-LAI)<=std::max(.1,.2*std::abs(history->lai));
+    std::vector<ephoto_leaf_hint> next_hints;
+    std::size_t hint_slot=0;
+
     auto leaf_photo =
         [&](double iabs,
             double j_shortwave,
             double layer_wind_speed,
             double layer_leafN) -> core::leaf_assim {
+        // Fixed Gauss-Legendre traversal visits each quadrature point's
+        // sunlit then shaded leaf in the same order across weather rows.
+        const std::size_t slot=hint_slot++;
+        next_hints.emplace_back();
+        const bool active_ephoto=c3_model_type==2 && iabs/.85>=5.0;
+        const double gs_minimum=StomataWS*b0+Gs_min*(1.0-StomataWS);
+        const ephoto_leaf_hint* hint=nullptr;
+        if(active_ephoto && ephoto_leaf_option("EPHOTO_WEATHER_HINTS") && history_compatible &&
+           slot<history->leaves.size() && history->leaves[slot].usable(
+               configuration,ambient_temperature,iabs/.85,RH,gs_minimum))
+            hint=&history->leaves[slot];
+        const bool known_unsteady=active_ephoto && history_compatible && slot<history->leaves.size() &&
+            history->leaves[slot].unsteady && history->leaves[slot].nearby(
+                configuration,ambient_temperature,iabs/.85,RH);
         double const effective_Vcmax =
             (lnfun != 0) ? layer_leafN * lnb1 + lnb0 : Vcmax_at_25;
         double constexpr gbw_guess = 1.2;
@@ -128,8 +151,9 @@ canopy_photosynthesis_outputs c3CanAC(
         energy_balance_outputs et;
         photosynthesis_outputs photo;
         ephoto_ci_context ci_context;
+        if(hint) ci_context.previous_ci=hint->ci;
 
-        auto calculate_gs = [&](double current_gs) {
+        auto evaluate_gs = [&](double current_gs) {
             et = leaf_energy_balance(
                 absorbed_longwave,
                 j_shortwave,
@@ -176,96 +200,16 @@ canopy_photosynthesis_outputs c3CanAC(
             return photo.Gs;
         };
 
-        // Use a short fixed-point solve as a fast path for easy, contractive
-        // cases. If it does not converge promptly, switch to bracketed methods.
-        int constexpr fast_path_iterations = 10;
-        root_finding::fixed_point fixed_point_solver(
-            fast_path_iterations,
-            1e-3,
-            1e-3);
-        root_finding::result_t result =
-            fixed_point_solver.solve(calculate_gs, gsw_estimate);
-
-        if (!root_finding::is_successful(result.flag)) {
-            // Solve the self-consistency equation calculated_gs(gs) - gs = 0.
-            // Unlike direct fixed-point iteration, the bracketed methods do not
-            // require calculated_gs to be a contraction near the solution.
-            auto gs_residual = [&](double current_gs) {
-                double const residual = calculate_gs(current_gs) - current_gs;
-                if (!std::isfinite(residual)) {
-                    throw std::runtime_error(
-                        "c3Canopy conductance residual is not finite at gs = " +
-                        std::to_string(current_gs) +
-                        ", absorbed PPFD = " + std::to_string(iabs) +
-                        ", wind speed = " + std::to_string(layer_wind_speed) +
-                        ", leaf nitrogen = " + std::to_string(layer_leafN));
-                }
-                return residual;
-            };
-
-            // Ball-Berry conductance cannot be less than its
-            // water-stress-adjusted intercept, so this provides a physical
-            // lower bound.
-            double const b0_adjusted =
-                StomataWS * b0 + Gs_min * (1.0 - StomataWS);
-            double const gs_lower = std::max(1e-8, b0_adjusted);
-            double gs_upper =
-                std::max(1.0, 2.0 * std::max(gsw_estimate, gs_lower));
-
-            double const residual_lower = gs_residual(gs_lower);
-            double residual_upper = gs_residual(gs_upper);
-
-            // Increase the upper bound until the residual changes sign. A
-            // failure to find such a bracket is reported separately from
-            // solver failure.
-            int bracket_expansions = 0;
-            int constexpr max_bracket_expansions = 10;
-            while (root_finding::same_signs(residual_lower, residual_upper) &&
-                   bracket_expansions < max_bracket_expansions) {
-                gs_upper *= 2.0;
-                residual_upper = gs_residual(gs_upper);
-                ++bracket_expansions;
-            }
-
-            if (root_finding::same_signs(residual_lower, residual_upper)) {
-                throw std::runtime_error(
-                    "c3Canopy could not bracket a self-consistent stomatal "
-                    "conductance after the fixed-point fast path failed: "
-                    "lower gs = " +
-                    std::to_string(gs_lower) +
-                    ", lower residual = " + std::to_string(residual_lower) +
-                    ", upper gs = " + std::to_string(gs_upper) +
-                    ", upper residual = " + std::to_string(residual_upper) +
-                    ", absorbed PPFD = " + std::to_string(iabs) +
-                    ", wind speed = " + std::to_string(layer_wind_speed) +
-                    ", leaf nitrogen = " + std::to_string(layer_leafN));
-            }
-
-            root_finding::dekker dekker_solver(100, 1e-3, 1e-3);
-            result = dekker_solver.solve(gs_residual, gs_lower, gs_upper);
-
-            if (!root_finding::is_successful(result.flag)) {
-                root_finding::illinois illinois_solver(200, 1e-3, 1e-3);
-                result =
-                    illinois_solver.solve(gs_residual, gs_lower, gs_upper);
-            }
-
-            if (!root_finding::is_successful(result.flag)) {
-                throw std::runtime_error(
-                    "c3Canopy conductance solvers failed after the fixed-point "
-                    "fast path. Termination flag:\n    " +
-                    root_finding::flag_message(result.flag) +
-                    "\n    lower gs = " + std::to_string(gs_lower) +
-                    ", upper gs = " + std::to_string(gs_upper) +
-                    ", absorbed PPFD = " + std::to_string(iabs) +
-                    ", wind speed = " + std::to_string(layer_wind_speed) +
-                    ", leaf nitrogen = " + std::to_string(layer_leafN));
+        const auto result=solve_ephoto_leaf_gs(evaluate_gs,ci_context,gsw_estimate,
+            gs_minimum,hint ? hint->gs : std::numeric_limits<double>::quiet_NaN(),
+            "c3Canopy",active_ephoto,!known_unsteady);
+        if(active_ephoto) {
+            next_hints[slot]={NAN,NAN,ambient_temperature,iabs/.85,RH,configuration,photo.penalty>=.01};
+            if(photo.penalty<.01 && std::isfinite(photo.Ci) && std::abs(photo.residual)<=ephoto_ci_abs_tolerance) {
+                next_hints[slot].ci=photo.Ci;
+                next_hints[slot].gs=result.root;
             }
         }
-
-        // Ensure the side-effect outputs correspond exactly to the accepted
-        // conductance rather than to an earlier solver evaluation.
-        calculate_gs(result.root);
 
         double constexpr transpiration_conversion =
             physical_constants::molar_mass_of_water * 36;
@@ -294,6 +238,12 @@ canopy_photosynthesis_outputs c3CanAC(
             0.0,
             LAI,
             nlayers);
+
+    if(history) {
+        history->leaves=std::move(next_hints);
+        history->layers=nlayers;
+        history->lai=LAI;
+    }
 
     double const whole_plant_gr =
         growth_resp(canopy.assim, growth_respiration_fraction);

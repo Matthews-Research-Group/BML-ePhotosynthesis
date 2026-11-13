@@ -117,6 +117,15 @@ photosynthesis_outputs c3photoC(
         ephoto_ci_diagnostic_scope diagnostic_scope;
         ephoto_ci_context local_context;
         auto& context = ephoto_context ? *ephoto_context : local_context;
+        const double ci_abs_tolerance=context.ci_abs_tolerance;
+        const double ci_rel_tolerance=context.ci_rel_tolerance;
+        if(!std::isfinite(ci_abs_tolerance) || ci_abs_tolerance<=0 ||
+           !std::isfinite(ci_rel_tolerance) || ci_rel_tolerance<0)
+            throw std::invalid_argument("invalid ePhoto Ci tolerances");
+        if(ephoto_runtime().enabled()) {
+            if(ci_abs_tolerance>ephoto_ci_abs_tolerance) ++ephoto_runtime().coarse_ci_solves;
+            else ++ephoto_runtime().strict_ci_solves;
+        }
         ephoto_outputs ephoto_result;
         stomata_outputs BB_res;
         double Gs{1e3};
@@ -145,6 +154,10 @@ photosynthesis_outputs c3photoC(
                     failedStatus = ephoto_result.status == ephoto_status::success
                         ? ephoto_status::invalid_output : ephoto_result.status;
                     return std::numeric_limits<double>::quiet_NaN();
+                }
+                if(context.guard_acceleration && ephoto_result.penalty>=0.01) {
+                    if(ephoto_runtime().enabled()) ++ephoto_runtime().unsteady_acceleration_rejections;
+                    throw ephoto_unsteady_acceleration{};
                 }
                 Assim = ephoto_result.A - RL;
                 Vc = ephoto_result.Vc;
@@ -228,16 +241,16 @@ photosynthesis_outputs c3photoC(
                         1.5 * std::abs(value / context.previous_slope)));
                 }
             }
-            const auto bracket = bracket_ephoto_ci(cached_residual, initial, lower, upper, radius);
+            const auto bracket = bracket_ephoto_ci(cached_residual, initial, lower, upper, radius, ci_abs_tolerance);
             root_finding::result_t result{};
             if (bracket.lower == bracket.upper) {
                 result = {bracket.lower, valid_residual(bracket.lower), 0,
                           root_finding::Flag::residual_zero};
             } else {
-                root_finding::dekker solver{100, ephoto_ci_abs_tolerance, ephoto_ci_rel_tolerance};
+                root_finding::dekker solver{100, ci_abs_tolerance, ci_rel_tolerance};
                 result = solver.solve(valid_residual, bracket.lower, bracket.upper);
                 if (!root_finding::is_successful(result.flag)) {
-                    root_finding::illinois fallback{200, ephoto_ci_abs_tolerance, ephoto_ci_rel_tolerance};
+                    root_finding::illinois fallback{200, ci_abs_tolerance, ci_rel_tolerance};
                     result = fallback.solve(valid_residual, bracket.lower, bracket.upper);
                 }
                 if (!root_finding::is_successful(result.flag)) {

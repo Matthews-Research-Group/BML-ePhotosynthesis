@@ -21,8 +21,10 @@ struct ephoto_ci_bracket {
 template <typename Function>
 ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
                                      double minimum, double maximum,
-                                     double initial_radius = 0.0) {
+                                     double initial_radius = 0.0,
+                                     double residual_tolerance = ephoto_ci_abs_tolerance) {
     if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
+        !std::isfinite(residual_tolerance) || residual_tolerance <= 0.0 ||
         !std::isfinite(initial) || !std::isfinite(initial_radius) || initial_radius < 0.0) {
         throw std::runtime_error("invalid Ci search interval");
     }
@@ -59,8 +61,8 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
     };
     for (int expansion = 0; expansion < 32; ++expansion) {
         for (int side = 0; side < 2; ++side) {
-            if (std::abs(lower.y) <= ephoto_ci_abs_tolerance) return {lower.x, lower.x};
-            if (std::abs(upper.y) <= ephoto_ci_abs_tolerance) return {upper.x, upper.x};
+            if (std::abs(lower.y) <= residual_tolerance) return {lower.x, lower.x};
+            if (std::abs(upper.y) <= residual_tolerance) return {upper.x, upper.x};
             if (root_finding::opposite_signs(lower.y, upper.y)) {
                 return {lower.x, upper.x};
             }
@@ -73,8 +75,8 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
         }
         radius = std::min(radius * 2.0, maximum - minimum);
     }
-    if (std::abs(lower.y) <= ephoto_ci_abs_tolerance) return {lower.x, lower.x};
-    if (std::abs(upper.y) <= ephoto_ci_abs_tolerance) return {upper.x, upper.x};
+    if (std::abs(lower.y) <= residual_tolerance) return {lower.x, lower.x};
+    if (std::abs(upper.y) <= residual_tolerance) return {upper.x, upper.x};
     if (root_finding::opposite_signs(lower.y, upper.y)) return {lower.x, upper.x};
     throw std::runtime_error("no valid sign-changing Ci bracket found");
 }

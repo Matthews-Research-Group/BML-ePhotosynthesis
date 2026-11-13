@@ -164,7 +164,8 @@ void c3_canopy::do_operation() const
         windspeed,
         windspeed_height,
         static_cast<int>(lnfun),
-        static_cast<int>(nlayers));
+        static_cast<int>(nlayers),
+        &leaf_history);
 
     update(canopy_assimilation_molar_flux_op, result.Assim);
     update(canopy_conductance_op, result.canopy_conductance);

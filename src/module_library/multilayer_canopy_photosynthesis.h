@@ -168,7 +168,7 @@ class multilayer_canopy_photosynthesis : public direct_module
     // Leaf photosynthesis module
     state_map leaf_module_quantities;
     state_map leaf_module_output_map;
-    std::unique_ptr<module> leaf_module;
+    std::vector<std::unique_ptr<module>> leaf_modules;
 
     // Pointers to input parameters
     std::vector<std::vector<std::pair<double*, const double*>>> leaf_input_ptr_pairs;
@@ -213,12 +213,6 @@ multilayer_canopy_photosynthesis<canopy_module_type, leaf_module_type>::multilay
             leaf_module_type::get_outputs());
 
     leaf_module_output_map = leaf_module_quantities;
-
-    // Create the leaf photosynthesis module
-    leaf_module =
-        std::unique_ptr<module>(new leaf_module_type(
-            leaf_module_quantities,
-            &leaf_module_output_map));
 
     // Find subsets of the leaf model's inputs
     string_vector multiclass_multilayer_leaf_inputs =
@@ -290,6 +284,11 @@ multilayer_canopy_photosynthesis<canopy_module_type, leaf_module_type>::multilay
             leaf_output_ptr_pairs.push_back(output_ptr_pairs);
         }
     }
+    // Each layer/class owns its numerical guesses. All instances use the
+    // same transient input/output maps, populated immediately before run().
+    for (std::size_t i=0;i<leaf_input_ptr_pairs.size();++i) {
+        leaf_modules.emplace_back(new leaf_module_type(leaf_module_quantities,&leaf_module_output_map));
+    }
 }
 
 template <typename canopy_module_type, typename leaf_module_type>
@@ -345,7 +344,7 @@ void multilayer_canopy_photosynthesis<canopy_module_type, leaf_module_type>::run
         }
 
         // Run the leaf module
-        leaf_module->run();
+        leaf_modules[i]->run();
 
         // Update the outputs from the leaf module
         for (auto const& x : leaf_output_ptr_pairs[i]) {

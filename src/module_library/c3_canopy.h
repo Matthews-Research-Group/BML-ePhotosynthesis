@@ -3,6 +3,7 @@
 
 #include "../framework/module.h"
 #include "../framework/state_map.h"
+#include "ephoto_leaf_solver.h"
 
 namespace BMLePhoto
 {
@@ -93,6 +94,7 @@ class c3_canopy : public direct_module
     static std::string get_name() { return "c3_canopy"; }
 
    private:
+    mutable ephoto_canopy_history leaf_history;
     double const& absorbed_longwave;
     double const& atmospheric_pressure;
     double const& atmospheric_scattering;

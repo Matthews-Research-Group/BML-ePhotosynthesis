@@ -3,6 +3,7 @@
 
 #include "../framework/state_map.h"
 #include "../framework/module.h"
+#include "ephoto_leaf_solver.h"
 
 namespace BMLePhoto
 {
@@ -94,6 +95,7 @@ class c3_leaf_photosynthesis : public direct_module
     static std::string get_name() { return "c3_leaf_photosynthesis"; }
 
    private:
+    mutable ephoto_leaf_hint previous_leaf_hint;
     // References to input quantities
     double const& absorbed_longwave;
     double const& absorbed_ppfd;

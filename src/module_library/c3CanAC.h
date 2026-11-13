@@ -3,6 +3,7 @@
 
 #include "canopy_photosynthesis_outputs.h"
 #include "c3_temperature_response.h"
+#include "ephoto_leaf_solver.h"
 
 canopy_photosynthesis_outputs c3CanAC(
     c3_temperature_response_parameters const tr_param,
@@ -53,6 +54,7 @@ canopy_photosynthesis_outputs c3CanAC(
     double const WindSpeed,
     double const WindSpeedHeight,
     int const lnfun,
-    int const nlayers);
+    int const nlayers,
+    ephoto_canopy_history* history = nullptr);
 
 #endif

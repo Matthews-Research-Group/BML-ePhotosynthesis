@@ -130,11 +130,21 @@ void c3_leaf_photosynthesis::do_operation() const
             electrons_per_oxygenation, beta_PSII, gbw_guess, exp_id, 1)
             .Gs;  // mol / m^2 / s
 
+    const bool active_ephoto=model_type==2 && absorbed_ppfd/.85>=5.0;
+    const double gs_minimum=StomataWS*b0+Gs_min*(1.0-StomataWS);
+    const auto configuration=ephoto_hint_configuration(tr_param, {exp_id,double(model_type),
+        b0,b1,Gs_min,Catm,RL_at_25,gm_at_25,Gstar_at_25,Kc_at_25,Ko_at_25,
+        Vcmax_at_25,Jmax_at_25,Tp_at_25,StomataWS,leafwidth});
+    const bool use_hint=active_ephoto && ephoto_leaf_option("EPHOTO_WEATHER_HINTS") &&
+        previous_leaf_hint.usable(configuration,ambient_temperature,absorbed_ppfd/.85,rh,gs_minimum);
+    const bool known_unsteady=active_ephoto && previous_leaf_hint.unsteady &&
+        previous_leaf_hint.nearby(configuration,ambient_temperature,absorbed_ppfd/.85,rh);
     photosynthesis_outputs photo;
     energy_balance_outputs et;
     ephoto_ci_context ci_context;
+    if(use_hint) ci_context.previous_ci=previous_leaf_hint.ci;
 
-    auto calculate_gs = [=, &photo, &et, &ci_context](double current_gs) {
+    auto evaluate_gs = [=, &photo, &et, &ci_context](double current_gs) {
         // 2. Solve Energy Balance with current g_s
         et = leaf_energy_balance(
             absorbed_longwave,
@@ -162,93 +172,18 @@ void c3_leaf_photosynthesis::do_operation() const
         return photo.Gs;
     };
 
-    // Use a short fixed-point solve as a fast path for easy, contractive
-    // cases. If it does not converge promptly, switch to bracketed methods.
-    int constexpr fast_path_iterations = 10;
-    root_finding::fixed_point fixed_point_solver(
-        fast_path_iterations,
-        1e-3,
-        1e-3);
-    root_finding::result_t result =
-        fixed_point_solver.solve(calculate_gs, initial_stomatal_conductance);
-
-    if (!root_finding::is_successful(result.flag)) {
-        // Solve the self-consistency equation calculated_gs(gs) - gs = 0.
-        // Unlike direct fixed-point iteration, the bracketed methods do not
-        // require calculated_gs to be a contraction near the solution.
-        auto gs_residual = [&](double current_gs) {
-            double const residual = calculate_gs(current_gs) - current_gs;
-            if (!std::isfinite(residual)) {
-                throw std::runtime_error(
-                    "c3_leaf_photosynthesis conductance residual is not "
-                    "finite at gs = " +
-                    std::to_string(current_gs) +
-                    ", absorbed PPFD = " + std::to_string(absorbed_ppfd) +
-                    ", wind speed = " + std::to_string(windspeed) +
-                    ", canopy height = " + std::to_string(height));
-            }
-            return residual;
-        };
-
-        // Ball-Berry conductance cannot be less than its
-        // water-stress-adjusted intercept, so this provides a physical lower
-        // bound.
-        double const b0_adjusted =
-            StomataWS * b0 + Gs_min * (1.0 - StomataWS);
-        double const gs_lower = std::max(1e-8, b0_adjusted);
-        double gs_upper = std::max(
-            1.0,
-            2.0 * std::max(initial_stomatal_conductance, gs_lower));
-
-        double const residual_lower = gs_residual(gs_lower);
-        double residual_upper = gs_residual(gs_upper);
-
-        int bracket_expansions = 0;
-        int constexpr max_bracket_expansions = 10;
-        while (root_finding::same_signs(residual_lower, residual_upper) &&
-               bracket_expansions < max_bracket_expansions) {
-            gs_upper *= 2.0;
-            residual_upper = gs_residual(gs_upper);
-            ++bracket_expansions;
+    const auto result=solve_ephoto_leaf_gs(evaluate_gs,ci_context,initial_stomatal_conductance,
+        gs_minimum,use_hint ? previous_leaf_hint.gs : std::numeric_limits<double>::quiet_NaN(),
+        "c3_leaf_photosynthesis",active_ephoto,!known_unsteady);
+    if(active_ephoto) {
+        previous_leaf_hint={NAN,NAN,ambient_temperature,absorbed_ppfd/.85,rh,configuration,photo.penalty>=.01};
+        if(photo.penalty<.01 && std::isfinite(photo.Ci) && std::abs(photo.residual)<=ephoto_ci_abs_tolerance) {
+            previous_leaf_hint.ci=photo.Ci;
+            previous_leaf_hint.gs=result.root;
         }
-
-        if (root_finding::same_signs(residual_lower, residual_upper)) {
-            throw std::runtime_error(
-                "c3_leaf_photosynthesis could not bracket a self-consistent "
-                "stomatal conductance after the fixed-point fast path failed: "
-                "lower gs = " +
-                std::to_string(gs_lower) +
-                ", lower residual = " + std::to_string(residual_lower) +
-                ", upper gs = " + std::to_string(gs_upper) +
-                ", upper residual = " + std::to_string(residual_upper) +
-                ", absorbed PPFD = " + std::to_string(absorbed_ppfd) +
-                ", wind speed = " + std::to_string(windspeed) +
-                ", canopy height = " + std::to_string(height));
-        }
-
-        root_finding::dekker dekker_solver(100, 1e-3, 1e-3);
-        result = dekker_solver.solve(gs_residual, gs_lower, gs_upper);
-
-        if (!root_finding::is_successful(result.flag)) {
-            root_finding::illinois illinois_solver(200, 1e-3, 1e-3);
-            result = illinois_solver.solve(gs_residual, gs_lower, gs_upper);
-        }
-
-        if (!root_finding::is_successful(result.flag)) {
-            throw std::runtime_error(
-                "c3_leaf_photosynthesis conductance solvers failed after the "
-                "fixed-point fast path. Termination flag:\n    " +
-                root_finding::flag_message(result.flag) +
-                "\n    lower gs = " + std::to_string(gs_lower) +
-                ", upper gs = " + std::to_string(gs_upper) +
-                ", absorbed PPFD = " + std::to_string(absorbed_ppfd) +
-                ", wind speed = " + std::to_string(windspeed) +
-                ", canopy height = " + std::to_string(height));
-        }
+    } else {
+        previous_leaf_hint=ephoto_leaf_hint{};
     }
-
-    // Ensure all side-effect outputs correspond to the accepted conductance.
-    calculate_gs(result.root);
 
     // Update the outputs
     update(Assim_op, photo.Assim);
