@@ -3,6 +3,11 @@
 
 #include <cstdlib>
 #include <limits>
+#include <iomanip>
+#include <sstream>
+#include <map>
+#include <tuple>
+#include <utility>
 #include <string>
 #include <vector>
 #include "ephoto_ci_context.h"
@@ -58,6 +63,35 @@ inline bool ephoto_gs_close(double a, double b, double factor = 1.0)
            std::abs(a - b) <= factor * std::max(1e-3, 1e-3 * std::min(std::abs(a), std::abs(b)));
 }
 
+// The outer root finder requires repeatable f(gs). Inner Ci hints and state
+// seeds can otherwise select a different result when the same gs is revisited.
+// Restore the complete leaf evaluation, including all side-effect outputs.
+// Accuracy and cold-start generation separate coarse work and cold retries.
+template <typename Evaluate, typename Energy, typename Photo>
+auto memoize_ephoto_leaf_trial(Evaluate&& evaluate, ephoto_ci_context& context, Energy& energy, Photo& photo, bool use_ephoto)
+{
+    using Key = std::tuple<double, double, double, std::size_t>;
+    using Snapshot = std::tuple<Energy, Photo, double, double>;
+    return [&, use_ephoto, evaluate = std::forward<Evaluate>(evaluate),
+            trials = std::map<Key, Snapshot>{}](double gs) mutable {
+        if (!use_ephoto || !std::isfinite(gs)) return evaluate(gs);
+        const Key key{gs, context.ci_abs_tolerance, context.ci_rel_tolerance, context.cold_start_generation};
+        const auto found = trials.find(key);
+        if (found != trials.end()) {
+            energy = std::get<0>(found->second);
+            photo = std::get<1>(found->second);
+            context.previous_ci = std::get<2>(found->second);
+            context.previous_slope = std::get<3>(found->second);
+            if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_trial_cache_hits;
+            return photo.Gs;
+        }
+        const double gs_calculated = evaluate(gs);
+        if (std::isfinite(gs_calculated))
+            trials.emplace(key, Snapshot{energy, photo, context.previous_ci, context.previous_slope});
+        return gs_calculated;
+    };
+}
+
 // Same fixed-point/bracketed strategy and final tolerances as the existing
 // conductance solver. Coarse Ci work never establishes final convergence.
 template <typename Evaluate>
@@ -83,7 +117,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         }
         return next;
     };
-    auto bracketed = [&](double estimate) {
+    auto bracketed = [&](double estimate, double interval_scale = 1.0) {
         require_strict();
         auto residual = [&](double gs) {
             const double value = calculate(gs) - gs;
@@ -100,6 +134,35 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         }
         if (root_finding::same_signs(f_lower, f_upper))
             throw std::runtime_error(label + ": could not bracket conductance");
+        // A narrow bracket alone need not imply a small conductance residual
+        // on a steep response. Refinement must tighten the search, rather than
+        // repeating the same convergence thresholds. Bisection guarantees
+        // interval progress on these exceptional refinement passes.
+        if (interval_scale < 1.0) {
+            double left = lower, right = upper, left_residual = f_lower;
+            double best = std::abs(f_lower) < std::abs(f_upper) ? lower : upper;
+            double best_residual = std::abs(f_lower) < std::abs(f_upper) ? f_lower : f_upper;
+            const double tolerance = 1e-3 * interval_scale;
+            for (std::size_t iteration = 0; iteration < 100; ++iteration) {
+                if (std::abs(best_residual) <= tolerance)
+                    return root_finding::result_t{best, best_residual, iteration, root_finding::Flag::residual_zero};
+                const double middle = left + .5 * (right - left);
+                if (middle == left || middle == right ||
+                    right - left <= std::max(tolerance, tolerance * std::min(std::abs(left), std::abs(right))))
+                    return root_finding::result_t{best, best_residual, iteration, root_finding::Flag::bracket_width_zero};
+                const double value = residual(middle);
+                if (std::abs(value) < std::abs(best_residual)) {
+                    best = middle;
+                    best_residual = value;
+                }
+                if (root_finding::same_signs(left_residual, value)) {
+                    left = middle;
+                    left_residual = value;
+                } else
+                    right = middle;
+            }
+            throw std::runtime_error(label + ": conductance refinement exhausted its iteration limit");
+        }
         root_finding::dekker solver{100, 1e-3, 1e-3};
         auto result = solver.solve(residual, lower, upper);
         if (!root_finding::is_successful(result.flag)) {
@@ -138,12 +201,21 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
     }
     require_strict();
     for (int refinement = 0; refinement < 3; ++refinement) {
+        const double root_residual = result.residual;
         const double synchronized = calculate(result.root);
         if (!use_ephoto) return result;
+        if (!ephoto_gs_close(synchronized, result.root)) {
+            std::ostringstream diagnostic;
+            diagnostic << std::setprecision(17) << "ePhoto conductance verification: refinement=" << refinement
+                       << " gs_trial=" << result.root << " gs_calculated=" << synchronized
+                       << " solver_residual=" << root_residual << " synchronized_residual=" << synchronized - result.root
+                       << " root_flag=" << root_finding::flag_message(result.flag) << "\n";
+            std::cerr << diagnostic.str() << std::flush;
+        }
         result.residual = synchronized - result.root;
         if (ephoto_gs_close(synchronized, result.root)) return result;
         if (ephoto_runtime().enabled()) ++ephoto_runtime().strict_refinements;
-        result = bracketed(result.root);
+        result = bracketed(result.root, std::pow(.1, refinement + 1));
     }
     // Ensure outputs and residuals refer to the last candidate, even on failure.
     const double synchronized = calculate(result.root);
@@ -156,7 +228,12 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
                                     std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
     }
-    throw std::runtime_error(label + ": strict final conductance residual exceeds tolerance");
+    std::ostringstream message;
+    message << std::setprecision(17) << label << ": strict final conductance residual exceeds tolerance"
+            << " gs_trial=" << result.root << " gs_calculated=" << synchronized
+            << " residual=" << result.residual << " initial_gs=" << initial_gs
+            << " minimum_gs=" << minimum_gs << " root_flag=" << root_finding::flag_message(result.flag);
+    throw std::runtime_error(message.str());
 }
 
 #endif

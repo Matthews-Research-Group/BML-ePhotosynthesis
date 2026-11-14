@@ -172,7 +172,8 @@ void c3_leaf_photosynthesis::do_operation() const
         return photo.Gs;
     };
 
-    const auto result=solve_ephoto_leaf_gs(evaluate_gs,ci_context,initial_stomatal_conductance,
+    auto cached_gs=memoize_ephoto_leaf_trial(evaluate_gs,ci_context,et,photo,active_ephoto);
+    const auto result=solve_ephoto_leaf_gs(cached_gs,ci_context,initial_stomatal_conductance,
         gs_minimum,use_hint ? previous_leaf_hint.gs : std::numeric_limits<double>::quiet_NaN(),
         "c3_leaf_photosynthesis",active_ephoto,!known_unsteady);
     if(active_ephoto) {

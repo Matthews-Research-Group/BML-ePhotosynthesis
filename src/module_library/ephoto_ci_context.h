@@ -16,6 +16,7 @@ struct ephoto_unsteady_acceleration {};
 struct ephoto_ci_context {
     ephoto_state biochemical_state;
     bool guard_acceleration = false;
+    std::size_t cold_start_generation = 0;
     double ci_abs_tolerance = ephoto_ci_abs_tolerance;
     double ci_rel_tolerance = ephoto_ci_rel_tolerance;
     // May be disabled for a matched cold-start comparison.
@@ -24,6 +25,7 @@ struct ephoto_ci_context {
     double previous_slope = std::numeric_limits<double>::quiet_NaN();
 
     void reset_for_cold_start() {
+        ++cold_start_generation;
         results.clear();
         biochemical_state=ephoto_state{};
         previous_ci=std::numeric_limits<double>::quiet_NaN();

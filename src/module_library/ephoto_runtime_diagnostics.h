@@ -24,6 +24,7 @@ struct ephoto_runtime_diagnostics {
     std::uint64_t seed_available = 0, seed_requested = 0, seed_used = 0, seed_saved = 0;
     std::uint64_t coarse_ci_solves=0, strict_ci_solves=0, strict_refinements=0;
     std::uint64_t weather_hints_used=0, leaf_cold_restarts=0, unsteady_acceleration_rejections=0;
+    std::uint64_t leaf_trial_cache_hits=0;
     std::uint64_t internal_steps = 0, rhs_evaluations = 0;
     double ode_seconds = 0.0, ci_seconds = 0.0, max_ode_seconds = 0.0;
     double last_ode_seconds = 0.0, profile = 0.0, ci = 0.0, ppfd = 0.0, temperature = 0.0;
@@ -69,6 +70,7 @@ struct ephoto_runtime_diagnostics {
              << " strict_refinements=" << strict_refinements << " weather_hints_used=" << weather_hints_used
              << " leaf_cold_restarts=" << leaf_cold_restarts
              << " unsteady_acceleration_rejections=" << unsteady_acceleration_rejections
+             << " leaf_trial_cache_hits=" << leaf_trial_cache_hits
              << " last_ode_seconds=" << last_ode_seconds << " last_steps=" << last_steps
              << " last_rhs=" << last_rhs << " last_A=" << assimilation << " last_penalty=" << penalty
              << " last_exp_id=" << last_profile << " last_Ci=" << last_ci

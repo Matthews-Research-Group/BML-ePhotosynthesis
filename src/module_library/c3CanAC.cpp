@@ -200,9 +200,26 @@ canopy_photosynthesis_outputs c3CanAC(
             return photo.Gs;
         };
 
-        const auto result=solve_ephoto_leaf_gs(evaluate_gs,ci_context,gsw_estimate,
-            gs_minimum,hint ? hint->gs : std::numeric_limits<double>::quiet_NaN(),
-            "c3Canopy",active_ephoto,!known_unsteady);
+        auto cached_gs=memoize_ephoto_leaf_trial(evaluate_gs,ci_context,et,photo,active_ephoto);
+        root_finding::result_t result;
+        try {
+            result=solve_ephoto_leaf_gs(cached_gs,ci_context,gsw_estimate,
+                gs_minimum,hint ? hint->gs : std::numeric_limits<double>::quiet_NaN(),
+                "c3Canopy",active_ephoto,!known_unsteady);
+        } catch(const std::runtime_error& error) {
+            std::ostringstream message;
+            message<<std::setprecision(17)<<error.what()
+                <<" exp_id="<<exp_id<<" absorbed_ppfd="<<iabs<<" shortwave="<<j_shortwave
+                <<" longwave="<<absorbed_longwave<<" ambient_temperature="<<ambient_temperature
+                <<" RH="<<RH<<" gbw_canopy="<<gbw_canopy<<" leaf_width="<<leaf_width
+                <<" wind_speed="<<layer_wind_speed<<" leafN="<<layer_leafN
+                <<" effective_Vcmax="<<effective_Vcmax<<" pressure="<<atmospheric_pressure
+                <<" o2="<<o2<<" beta_PSII="<<beta_PSII
+                <<" electrons_carbox="<<electrons_per_carboxylation
+                <<" electrons_oxygen="<<electrons_per_oxygenation<<" configuration=";
+            for(double value:configuration) message<<value<<',';
+            throw std::runtime_error(message.str());
+        }
         if(active_ephoto) {
             next_hints[slot]={NAN,NAN,ambient_temperature,iabs/.85,RH,configuration,photo.penalty>=.01};
             if(photo.penalty<.01 && std::isfinite(photo.Ci) && std::abs(photo.residual)<=ephoto_ci_abs_tolerance) {
