@@ -182,58 +182,63 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
     };
     const bool use_hint = allow_acceleration && use_ephoto && std::isfinite(hinted_gs);
     if (use_hint && ephoto_runtime().enabled()) ++ephoto_runtime().weather_hints_used;
-    root_finding::result_t result;
+    // The acceleration guard can reject a trial during final verification
+    // or refinement as well as during the initial root search. All stages
+    // must route that internal signal to the strict cold retry.
     try {
-        result = fixed_then_bracketed(use_hint ? hinted_gs : initial_gs);
+        root_finding::result_t result;
+        try {
+            result = fixed_then_bracketed(use_hint ? hinted_gs : initial_gs);
+        } catch (const std::runtime_error&) {
+            if (!adaptive && !use_hint) throw;
+            // A tentative approximation or weather guess must not prevent the
+            // original, fully accurate cold-start strategy from being attempted.
+            require_strict();
+            context.reset_for_cold_start();
+            if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
+            result = fixed_then_bracketed(initial_gs);
+        }
+        require_strict();
+        for (int refinement = 0; refinement < 3; ++refinement) {
+            const double root_residual = result.residual;
+            const double synchronized = calculate(result.root);
+            if (!use_ephoto) return result;
+            if (!ephoto_gs_close(synchronized, result.root)) {
+                std::ostringstream diagnostic;
+                diagnostic << std::setprecision(17) << "ePhoto conductance verification: refinement=" << refinement
+                           << " gs_trial=" << result.root << " gs_calculated=" << synchronized
+                           << " solver_residual=" << root_residual << " synchronized_residual=" << synchronized - result.root
+                           << " root_flag=" << root_finding::flag_message(result.flag) << "\n";
+                std::cerr << diagnostic.str() << std::flush;
+            }
+            result.residual = synchronized - result.root;
+            if (ephoto_gs_close(synchronized, result.root)) return result;
+            if (ephoto_runtime().enabled()) ++ephoto_runtime().strict_refinements;
+            result = bracketed(result.root, std::pow(.1, refinement + 1));
+        }
+        // Ensure outputs and residuals refer to the last candidate, even on failure.
+        const double synchronized = calculate(result.root);
+        result.residual = synchronized - result.root;
+        if (ephoto_gs_close(synchronized, result.root)) return result;
+        if (adaptive || use_hint) {
+            // A failed final verification also gets the original strict cold solve.
+            context.reset_for_cold_start();
+            if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
+            return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
+                                        std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
+        }
+        std::ostringstream message;
+        message << std::setprecision(17) << label << ": strict final conductance residual exceeds tolerance"
+                << " gs_trial=" << result.root << " gs_calculated=" << synchronized
+                << " residual=" << result.residual << " initial_gs=" << initial_gs
+                << " minimum_gs=" << minimum_gs << " root_flag=" << root_finding::flag_message(result.flag);
+        throw std::runtime_error(message.str());
     } catch (const ephoto_unsteady_acceleration&) {
         context.reset_for_cold_start();
         if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
         return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
                                     std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
-    } catch (const std::runtime_error&) {
-        if (!adaptive && !use_hint) throw;
-        // A tentative approximation or weather guess must not prevent the
-        // original, fully accurate cold-start strategy from being attempted.
-        require_strict();
-        context.reset_for_cold_start();
-        if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
-        result = fixed_then_bracketed(initial_gs);
     }
-    require_strict();
-    for (int refinement = 0; refinement < 3; ++refinement) {
-        const double root_residual = result.residual;
-        const double synchronized = calculate(result.root);
-        if (!use_ephoto) return result;
-        if (!ephoto_gs_close(synchronized, result.root)) {
-            std::ostringstream diagnostic;
-            diagnostic << std::setprecision(17) << "ePhoto conductance verification: refinement=" << refinement
-                       << " gs_trial=" << result.root << " gs_calculated=" << synchronized
-                       << " solver_residual=" << root_residual << " synchronized_residual=" << synchronized - result.root
-                       << " root_flag=" << root_finding::flag_message(result.flag) << "\n";
-            std::cerr << diagnostic.str() << std::flush;
-        }
-        result.residual = synchronized - result.root;
-        if (ephoto_gs_close(synchronized, result.root)) return result;
-        if (ephoto_runtime().enabled()) ++ephoto_runtime().strict_refinements;
-        result = bracketed(result.root, std::pow(.1, refinement + 1));
-    }
-    // Ensure outputs and residuals refer to the last candidate, even on failure.
-    const double synchronized = calculate(result.root);
-    result.residual = synchronized - result.root;
-    if (ephoto_gs_close(synchronized, result.root)) return result;
-    if (adaptive || use_hint) {
-        // A failed final verification also gets the original strict cold solve.
-        context.reset_for_cold_start();
-        if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
-        return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
-                                    std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
-    }
-    std::ostringstream message;
-    message << std::setprecision(17) << label << ": strict final conductance residual exceeds tolerance"
-            << " gs_trial=" << result.root << " gs_calculated=" << synchronized
-            << " residual=" << result.residual << " initial_gs=" << initial_gs
-            << " minimum_gs=" << minimum_gs << " root_flag=" << root_finding::flag_message(result.flag);
-    throw std::runtime_error(message.str());
 }
 
 #endif
