@@ -203,8 +203,8 @@ canopy_photosynthesis_outputs c3CanAC(
         auto cached_gs=memoize_ephoto_leaf_trial(evaluate_gs,ci_context,et,photo,active_ephoto);
         root_finding::result_t result;
         try {
-            result=solve_ephoto_leaf_gs(cached_gs,ci_context,gsw_estimate,
-                gs_minimum,hint ? hint->gs : std::numeric_limits<double>::quiet_NaN(),
+            result=solve_ephoto_leaf_with_joint(cached_gs,evaluate_gs,ci_context,et,photo,gsw_estimate,
+                gs_minimum,hint ? hint->gs : std::numeric_limits<double>::quiet_NaN(),2*Catm,
                 "c3Canopy",active_ephoto,!known_unsteady);
         } catch(const std::runtime_error& error) {
             std::ostringstream message;

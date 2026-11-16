@@ -230,6 +230,11 @@ photosynthesis_outputs c3photoC(
                     if (trial.first > initial) upper = std::min(upper, trial.first);
                 }
             }
+            if (context.joint_evaluation) {
+                const double ci=context.joint_ci;
+                const double value=valid_residual(ci);
+                return root_finding::result_t{ci,value,0,root_finding::Flag::residual_zero};
+            }
             if (context.local_ci_refinement) {
                 auto result = refine_local_ephoto_ci(cached_residual, context.local_ci_anchor,
                     lower, upper, ci_abs_tolerance, ci_rel_tolerance);
@@ -281,7 +286,9 @@ photosynthesis_outputs c3photoC(
             const bool use_previous = std::isfinite(context.previous_ci) &&
                 context.previous_ci > Ci_min && context.previous_ci < Ci_max * 1.01 &&
                 context.previous_ci != cold_initial;
-            if (context.local_ci_refinement) {
+            if (context.joint_evaluation) {
+                result=solve_from(context.joint_ci,false);
+            } else if (context.local_ci_refinement) {
                 result = solve_from(context.local_ci_anchor, true);
             } else if (use_previous) {
                 try {

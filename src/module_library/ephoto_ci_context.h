@@ -25,6 +25,19 @@ struct ephoto_ci_context {
     double previous_slope = std::numeric_limits<double>::quiet_NaN();
     bool local_ci_refinement = false;
     double local_ci_anchor = std::numeric_limits<double>::quiet_NaN();
+    bool joint_evaluation = false;
+    double joint_ci = std::numeric_limits<double>::quiet_NaN();
+    double last_gs_trial = std::numeric_limits<double>::quiet_NaN();
+
+    void begin_joint_evaluation() {
+        // Ordinary results may have used eligible biochemical seeds. Mixing
+        // those transient endpoints with cold candidates changes the residual
+        // function. Joint candidates must all use the same initialization.
+        local_results.clear();
+        joint_evaluation=true;
+        guard_acceleration=false;
+        reuse_biochemical_state=false;
+    }
 
     void begin_local_ci_refinement(double anchor) {
         local_results=results;
@@ -42,6 +55,8 @@ struct ephoto_ci_context {
         guard_acceleration=false;
         local_ci_refinement=false;
         local_ci_anchor=std::numeric_limits<double>::quiet_NaN();
+        joint_evaluation=false;
+        joint_ci=std::numeric_limits<double>::quiet_NaN();
     }
 
     ~ephoto_ci_context() {
@@ -66,7 +81,7 @@ struct ephoto_ci_context {
             return calculate();
         }
         const auto key = std::make_tuple(temperature, ppfd, ci, experiment);
-        auto& cache = local_ci_refinement ? local_results : results;
+        auto& cache = (local_ci_refinement || joint_evaluation) ? local_results : results;
         const auto found = cache.find(key);
         if (found != cache.end()) {
             if (diagnostics.enabled()) ++diagnostics.cache_hits;

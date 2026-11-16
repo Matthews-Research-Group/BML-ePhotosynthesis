@@ -13,6 +13,7 @@
 #include "ephoto_ci_context.h"
 #include "c3_temperature_response.h"
 #include "ephoto_ci_bracket.h"
+#include "ephoto_joint_solver.h"
 #include "../math/roots/onedim/fixed_point.h"
 #include "../math/roots/onedim/dekker.h"
 #include "../math/roots/onedim/illinois.h"
@@ -166,6 +167,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         context.ci_rel_tolerance = ephoto_ci_rel_tolerance;
     };
     auto calculate = [&](double gs) {
+        context.last_gs_trial=gs;
         context.ci_abs_tolerance = strict ? ephoto_ci_abs_tolerance : .05;
         context.ci_rel_tolerance = strict ? ephoto_ci_rel_tolerance : 1e-4;
         double next = raw(gs);
@@ -249,6 +251,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         std::string local_recovery_error;
         root_finding::result_t result;
         auto try_local_recovery = [&](double synchronized, bool final_check = false) {
+            if (std::getenv("EPHOTO_JOINT_CI_GS") && ephoto_leaf_option("EPHOTO_JOINT_CI_GS")) return false;
             const double window=std::max(.005,.02*std::abs(result.root));
             // A correction outside this window needs the ordinary global
             // refinement first. Do not spend local ODE calls on that search.
@@ -322,6 +325,75 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
         return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
                                     std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
+    }
+}
+
+template<class Raw,class Energy,class Photo>
+root_finding::result_t solve_joint_ephoto_leaf(Raw& raw,ephoto_ci_context& context,
+    Energy& energy,Photo& photo,double ci,double gs,double minimum_gs,double maximum_ci)
+{
+    const bool reuse=context.reuse_biochemical_state, guard=context.guard_acceleration;
+    context.begin_joint_evaluation();
+    using Snapshot=std::tuple<Energy,Photo>;
+    std::map<std::pair<double,double>,Snapshot> cache;
+    auto evaluate=[&](double trial_ci,double trial_gs) {
+        context.joint_ci=trial_ci;
+        const auto key=std::make_pair(trial_ci,trial_gs);
+        const auto found=cache.find(key);
+        if(found!=cache.end()) {
+            energy=std::get<0>(found->second); photo=std::get<1>(found->second);
+        } else {
+            raw(trial_gs);
+            cache.emplace(key,Snapshot{energy,photo});
+        }
+        context.previous_ci=photo.Ci;
+        context.last_gs_trial=trial_gs;
+        return std::array<double,2>{{photo.residual,photo.Gs-trial_gs}};
+    };
+    auto& diagnostics=ephoto_runtime();
+    const auto before=diagnostics.ode_completed;
+    std::ostringstream started;
+    started<<std::setprecision(17)<<"ePhoto joint Ci-Gs fallback started: initialization=cold Ci="<<ci<<" gs="<<gs<<'\n';
+    std::cerr<<started.str()<<std::flush;
+    try {
+        const auto result=solve_ephoto_joint(evaluate,ci,gs,minimum_gs,maximum_ci);
+        const auto verified=evaluate(result.ci,result.gs);
+        if(!ephoto_joint_accepted(result.gs,verified))
+            throw std::runtime_error("joint Ci-Gs final verification failed");
+        std::ostringstream accepted;
+        accepted<<std::setprecision(17)<<"ePhoto joint Ci-Gs accepted: Ci="<<result.ci
+            <<" gs="<<result.gs<<" Ci_residual="<<verified[0]<<" Gs_residual="<<verified[1]
+            <<" evaluations="<<result.evaluations;
+        if(diagnostics.enabled()) accepted<<" ode_calls="<<diagnostics.ode_completed-before;
+        accepted<<'\n';
+        std::cerr<<accepted.str()<<std::flush;
+        return {result.gs,verified[1],result.evaluations,root_finding::Flag::residual_zero};
+    } catch(...) {
+        context.joint_evaluation=false;
+        context.joint_ci=NAN;
+        context.reuse_biochemical_state=reuse; context.guard_acceleration=guard;
+        throw;
+    }
+}
+
+template<class Nested,class Raw,class Energy,class Photo>
+root_finding::result_t solve_ephoto_leaf_with_joint(Nested& nested,Raw& raw,
+    ephoto_ci_context& context,Energy& energy,Photo& photo,double initial_gs,
+    double minimum_gs,double hinted_gs,double maximum_ci,const std::string& label,
+    bool use_ephoto,bool allow_acceleration=true)
+{
+    try {
+        return solve_ephoto_leaf_gs(nested,context,initial_gs,minimum_gs,hinted_gs,label,use_ephoto,allow_acceleration);
+    } catch(const std::runtime_error& error) {
+        const std::string original=error.what();
+        if(!use_ephoto || !std::getenv("EPHOTO_JOINT_CI_GS") || !ephoto_leaf_option("EPHOTO_JOINT_CI_GS") ||
+           original.find("strict final conductance residual")==std::string::npos) throw;
+        try {
+            return solve_joint_ephoto_leaf(raw,context,energy,photo,photo.Ci,
+                context.last_gs_trial,minimum_gs,maximum_ci);
+        } catch(const std::runtime_error& joint_error) {
+            throw std::runtime_error(original+"; joint fallback failed: "+joint_error.what());
+        }
     }
 }
 
