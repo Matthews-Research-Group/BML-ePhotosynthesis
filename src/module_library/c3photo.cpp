@@ -3,6 +3,7 @@
 #include <map>
 #include <sstream>
 #include "ephoto_ci_bracket.h"
+#include "ephoto_ci_local.h"
 #include <limits>                         // for std::numeric_limits
 #include "../framework/constants.h"       // for dr_stomata, dr_boundary
 #include "ball_berry_gs.h"                // for ball_berry_gs
@@ -229,6 +230,14 @@ photosynthesis_outputs c3photoC(
                     if (trial.first > initial) upper = std::min(upper, trial.first);
                 }
             }
+            if (context.local_ci_refinement) {
+                auto result = refine_local_ephoto_ci(cached_residual, context.local_ci_anchor,
+                    lower, upper, ci_abs_tolerance, ci_rel_tolerance);
+                result.residual = check_assim_rate(result.root);
+                if (!std::isfinite(result.residual) || std::abs(result.residual) > ci_abs_tolerance)
+                    throw std::runtime_error("final local Ci residual exceeds tolerance");
+                return result;
+            }
             double radius = 0.0;
             if (warm) {
                 // Use the previous local slope only to size the first bracket
@@ -272,7 +281,9 @@ photosynthesis_outputs c3photoC(
             const bool use_previous = std::isfinite(context.previous_ci) &&
                 context.previous_ci > Ci_min && context.previous_ci < Ci_max * 1.01 &&
                 context.previous_ci != cold_initial;
-            if (use_previous) {
+            if (context.local_ci_refinement) {
+                result = solve_from(context.local_ci_anchor, true);
+            } else if (use_previous) {
                 try {
                     result = solve_from(context.previous_ci, true);
                 } catch (const std::runtime_error&) {

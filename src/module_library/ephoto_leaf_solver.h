@@ -66,16 +66,17 @@ inline bool ephoto_gs_close(double a, double b, double factor = 1.0)
 // The outer root finder requires repeatable f(gs). Inner Ci hints and state
 // seeds can otherwise select a different result when the same gs is revisited.
 // Restore the complete leaf evaluation, including all side-effect outputs.
-// Accuracy and cold-start generation separate coarse work and cold retries.
+// Accuracy, cold-start generation and local-recovery mode separate trials.
 template <typename Evaluate, typename Energy, typename Photo>
 auto memoize_ephoto_leaf_trial(Evaluate&& evaluate, ephoto_ci_context& context, Energy& energy, Photo& photo, bool use_ephoto)
 {
-    using Key = std::tuple<double, double, double, std::size_t>;
+    using Key = std::tuple<double, double, double, std::size_t, bool>;
     using Snapshot = std::tuple<Energy, Photo, double, double>;
     return [&, use_ephoto, evaluate = std::forward<Evaluate>(evaluate),
             trials = std::map<Key, Snapshot>{}](double gs) mutable {
         if (!use_ephoto || !std::isfinite(gs)) return evaluate(gs);
-        const Key key{gs, context.ci_abs_tolerance, context.ci_rel_tolerance, context.cold_start_generation};
+        const Key key{gs, context.ci_abs_tolerance, context.ci_rel_tolerance, context.cold_start_generation,
+                      context.local_ci_refinement};
         const auto found = trials.find(key);
         if (found != trials.end()) {
             energy = std::get<0>(found->second);
@@ -92,8 +93,66 @@ auto memoize_ephoto_leaf_trial(Evaluate&& evaluate, ephoto_ci_context& context, 
     };
 }
 
-// Same fixed-point/bracketed strategy and final tolerances as the existing
-// conductance solver. Coarse Ci work never establishes final convergence.
+// Exceptional local recovery preserves ordinary caches and policies on failure.
+template <typename Evaluate>
+root_finding::result_t recover_local_ephoto_leaf(Evaluate& raw, ephoto_ci_context& context,
+    double candidate, double minimum_gs, const std::string& label)
+{
+    const double anchor = context.previous_ci;
+    const double slope = context.previous_slope;
+    const bool reuse = context.reuse_biochemical_state;
+    const bool guard = context.guard_acceleration;
+    context.begin_local_ci_refinement(anchor);
+    context.guard_acceleration = false;
+    context.reuse_biochemical_state = false;
+    std::cerr << "ePhoto local Ci recovery: gs=" << candidate << " anchor_Ci=" << anchor << '\n' << std::flush;
+    try {
+        std::string invalid_reason;
+        auto residual = [&](double gs) {
+            try { return raw(gs)-gs; }
+            catch (const std::runtime_error& error) {
+                invalid_reason=error.what();
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+        };
+        const double window = std::max(.005, .02*std::abs(candidate));
+        const auto bracket=[&]() {
+            try {
+                return bracket_ephoto_ci(residual, candidate,
+                    std::max(minimum_gs, candidate-window), candidate+window,
+                    std::max(1e-4, window/8), 1e-3, true, 8);
+            } catch (const std::runtime_error& error) {
+                throw std::runtime_error(label+": "+error.what()+
+                    (invalid_reason.empty() ? std::string{} : ": "+invalid_reason));
+            }
+        }();
+        root_finding::result_t result;
+        if (bracket.lower==bracket.upper)
+            result={bracket.lower,residual(bracket.lower),0,root_finding::Flag::residual_zero};
+        else {
+            root_finding::dekker solver{100,1e-4,1e-4};
+            result=solver.solve(residual,bracket.lower,bracket.upper);
+        }
+        const double synchronized=raw(result.root);
+        result.residual=synchronized-result.root;
+        if (!root_finding::is_successful(result.flag) || !ephoto_gs_close(synchronized,result.root))
+            throw std::runtime_error("local conductance recovery did not satisfy the final residual" +
+                (invalid_reason.empty() ? std::string{} : ": "+invalid_reason));
+        std::cerr << "ePhoto local Ci recovery accepted: residual=" << result.residual << '\n' << std::flush;
+        return result;
+    } catch (...) {
+        context.local_ci_refinement=false;
+        context.local_ci_anchor=std::numeric_limits<double>::quiet_NaN();
+        context.previous_ci=anchor;
+        context.previous_slope=slope;
+        context.reuse_biochemical_state=reuse;
+        context.guard_acceleration=guard;
+        throw;
+    }
+}
+
+// Ordinary fixed-point/bracketed strategy and final acceptance tolerances.
+// Coarse Ci work never establishes final convergence.
 template <typename Evaluate>
 root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& context, double initial_gs, double minimum_gs, double hinted_gs, const std::string& label, bool use_ephoto, bool allow_acceleration = true)
 {
@@ -186,7 +245,29 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
     // or refinement as well as during the initial root search. All stages
     // must route that internal signal to the strict cold retry.
     try {
+        bool local_recovery_attempted=false;
+        std::string local_recovery_error;
         root_finding::result_t result;
+        auto try_local_recovery = [&](double synchronized, bool final_check = false) {
+            const double window=std::max(.005,.02*std::abs(result.root));
+            // A correction outside this window needs the ordinary global
+            // refinement first. Do not spend local ODE calls on that search.
+            if (adaptive || use_hint || local_recovery_attempted ||
+                !std::isfinite(context.previous_ci) || !std::isfinite(synchronized) ||
+                std::abs(synchronized-result.root)>window ||
+                !std::getenv("EPHOTO_LOCAL_CI_REFINEMENT") ||
+                !ephoto_leaf_option("EPHOTO_LOCAL_CI_REFINEMENT")) return false;
+            if (!final_check && !ephoto_gs_close(synchronized,result.root,5.0)) return false;
+            local_recovery_attempted=true;
+            try {
+                result=recover_local_ephoto_leaf(raw,context,result.root,minimum_gs,label);
+                return true;
+            } catch (const std::runtime_error& error) {
+                local_recovery_error=error.what();
+                std::cerr << "ePhoto local Ci recovery failed: " << local_recovery_error << '\n' << std::flush;
+                return false;
+            }
+        };
         try {
             result = fixed_then_bracketed(use_hint ? hinted_gs : initial_gs);
         } catch (const std::runtime_error&) {
@@ -213,6 +294,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
             }
             result.residual = synchronized - result.root;
             if (ephoto_gs_close(synchronized, result.root)) return result;
+            if (try_local_recovery(synchronized)) return result;
             if (ephoto_runtime().enabled()) ++ephoto_runtime().strict_refinements;
             result = bracketed(result.root, std::pow(.1, refinement + 1));
         }
@@ -220,6 +302,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         const double synchronized = calculate(result.root);
         result.residual = synchronized - result.root;
         if (ephoto_gs_close(synchronized, result.root)) return result;
+        if (try_local_recovery(synchronized,true)) return result;
         if (adaptive || use_hint) {
             // A failed final verification also gets the original strict cold solve.
             context.reset_for_cold_start();
@@ -232,6 +315,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
                 << " gs_trial=" << result.root << " gs_calculated=" << synchronized
                 << " residual=" << result.residual << " initial_gs=" << initial_gs
                 << " minimum_gs=" << minimum_gs << " root_flag=" << root_finding::flag_message(result.flag);
+        if (!local_recovery_error.empty()) message << " local_Ci_recovery=" << local_recovery_error;
         throw std::runtime_error(message.str());
     } catch (const ephoto_unsteady_acceleration&) {
         context.reset_for_cold_start();

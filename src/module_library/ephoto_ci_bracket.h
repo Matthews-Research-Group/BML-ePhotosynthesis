@@ -22,10 +22,12 @@ template <typename Function>
 ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
                                      double minimum, double maximum,
                                      double initial_radius = 0.0,
-                                     double residual_tolerance = ephoto_ci_abs_tolerance) {
+                                     double residual_tolerance = ephoto_ci_abs_tolerance,
+                                     bool accept_approximate_root = true,
+                                     int maximum_expansions = 32) {
     if (!std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum ||
         !std::isfinite(residual_tolerance) || residual_tolerance <= 0.0 ||
-        !std::isfinite(initial) || !std::isfinite(initial_radius) || initial_radius < 0.0) {
+        !std::isfinite(initial) || !std::isfinite(initial_radius) || initial_radius < 0.0 || maximum_expansions < 1) {
         throw std::runtime_error("invalid Ci search interval");
     }
     initial = std::max(minimum, std::min(initial, maximum));
@@ -34,6 +36,9 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
         throw std::runtime_error("initial Ci evaluation failed");
     }
     auto upper = lower;
+    auto accepted = [&](double value) {
+        return value == 0.0 || (accept_approximate_root && std::abs(value) <= residual_tolerance);
+    };
     double lowerLimit = minimum;
     double upperLimit = maximum;
     bool lowerBlocked = false;
@@ -59,10 +64,10 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
         }
         blocked = true;
     };
-    for (int expansion = 0; expansion < 32; ++expansion) {
+    for (int expansion = 0; expansion < maximum_expansions; ++expansion) {
         for (int side = 0; side < 2; ++side) {
-            if (std::abs(lower.y) <= residual_tolerance) return {lower.x, lower.x};
-            if (std::abs(upper.y) <= residual_tolerance) return {upper.x, upper.x};
+            if (accepted(lower.y)) return {lower.x, lower.x};
+            if (accepted(upper.y)) return {upper.x, upper.x};
             if (root_finding::opposite_signs(lower.y, upper.y)) {
                 return {lower.x, upper.x};
             }
@@ -75,8 +80,8 @@ ephoto_ci_bracket bracket_ephoto_ci(Function& residual, double initial,
         }
         radius = std::min(radius * 2.0, maximum - minimum);
     }
-    if (std::abs(lower.y) <= residual_tolerance) return {lower.x, lower.x};
-    if (std::abs(upper.y) <= residual_tolerance) return {upper.x, upper.x};
+    if (accepted(lower.y)) return {lower.x, lower.x};
+    if (accepted(upper.y)) return {upper.x, upper.x};
     if (root_finding::opposite_signs(lower.y, upper.y)) return {lower.x, upper.x};
     throw std::runtime_error("no valid sign-changing Ci bracket found");
 }

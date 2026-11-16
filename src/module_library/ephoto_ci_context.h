@@ -23,14 +23,25 @@ struct ephoto_ci_context {
     bool reuse_biochemical_state = true;
     double previous_ci = std::numeric_limits<double>::quiet_NaN();
     double previous_slope = std::numeric_limits<double>::quiet_NaN();
+    bool local_ci_refinement = false;
+    double local_ci_anchor = std::numeric_limits<double>::quiet_NaN();
+
+    void begin_local_ci_refinement(double anchor) {
+        local_results=results;
+        local_ci_anchor=anchor;
+        local_ci_refinement=true;
+    }
 
     void reset_for_cold_start() {
         ++cold_start_generation;
         results.clear();
+        local_results.clear();
         biochemical_state=ephoto_state{};
         previous_ci=std::numeric_limits<double>::quiet_NaN();
         previous_slope=std::numeric_limits<double>::quiet_NaN();
         guard_acceleration=false;
+        local_ci_refinement=false;
+        local_ci_anchor=std::numeric_limits<double>::quiet_NaN();
     }
 
     ~ephoto_ci_context() {
@@ -55,22 +66,24 @@ struct ephoto_ci_context {
             return calculate();
         }
         const auto key = std::make_tuple(temperature, ppfd, ci, experiment);
-        const auto found = results.find(key);
-        if (found != results.end()) {
+        auto& cache = local_ci_refinement ? local_results : results;
+        const auto found = cache.find(key);
+        if (found != cache.end()) {
             if (diagnostics.enabled()) ++diagnostics.cache_hits;
             return found->second;
         }
         const auto value = calculate();
         // Bound storage even when a difficult conductance solve tries many
         // temperatures. Per-Ci-solve residual/failure tracking is independent.
-        if (results.size() >= 512) results.clear();
-        results.emplace(key, value);
+        if (cache.size() >= 512) cache.clear();
+        cache.emplace(key, value);
         return value;
     }
 
 private:
     bool diagnostics_used = false;
     std::map<std::tuple<double, double, double, double>, ephoto_outputs> results;
+    std::map<std::tuple<double, double, double, double>, ephoto_outputs> local_results;
 };
 
 #endif
