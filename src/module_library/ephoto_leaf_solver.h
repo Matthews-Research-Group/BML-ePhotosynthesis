@@ -152,10 +152,16 @@ root_finding::result_t recover_local_ephoto_leaf(Evaluate& raw, ephoto_ci_contex
     }
 }
 
+// Internal control signal: only a failed strict verification can request the
+// experimental early handoff. It never establishes convergence.
+struct ephoto_early_joint : std::runtime_error {
+    ephoto_early_joint() : std::runtime_error("strict cold conductance verification requested early joint recovery") {}
+};
+
 // Ordinary fixed-point/bracketed strategy and final acceptance tolerances.
 // Coarse Ci work never establishes final convergence.
 template <typename Evaluate>
-root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& context, double initial_gs, double minimum_gs, double hinted_gs, const std::string& label, bool use_ephoto, bool allow_acceleration = true)
+root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& context, double initial_gs, double minimum_gs, double hinted_gs, const std::string& label, bool use_ephoto, bool allow_acceleration = true, bool allow_early_joint = true)
 {
     const bool adaptive = allow_acceleration && use_ephoto && ephoto_leaf_option("EPHOTO_ADAPTIVE_CI");
     bool strict = !adaptive;
@@ -297,6 +303,13 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
             }
             result.residual = synchronized - result.root;
             if (ephoto_gs_close(synchronized, result.root)) return result;
+            // Keep the normal solve first. Once its fully strict, unhinted
+            // candidate fails verification, avoid repeating global refinement
+            // before trying the coupled residual function. Opt in explicitly.
+            if (allow_early_joint && !adaptive && !use_hint &&
+                std::getenv("EPHOTO_EARLY_JOINT") && ephoto_leaf_option("EPHOTO_EARLY_JOINT") &&
+                std::getenv("EPHOTO_JOINT_CI_GS") && ephoto_leaf_option("EPHOTO_JOINT_CI_GS"))
+                throw ephoto_early_joint{};
             if (try_local_recovery(synchronized)) return result;
             if (ephoto_runtime().enabled()) ++ephoto_runtime().strict_refinements;
             result = bracketed(result.root, std::pow(.1, refinement + 1));
@@ -311,7 +324,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
             context.reset_for_cold_start();
             if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
             return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
-                                        std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
+                                        std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false, allow_early_joint);
         }
         std::ostringstream message;
         message << std::setprecision(17) << label << ": strict final conductance residual exceeds tolerance"
@@ -324,7 +337,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         context.reset_for_cold_start();
         if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
         return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
-                                    std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false);
+                                    std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false, allow_early_joint);
     }
 }
 
@@ -353,7 +366,8 @@ root_finding::result_t solve_joint_ephoto_leaf(Raw& raw,ephoto_ci_context& conte
     auto& diagnostics=ephoto_runtime();
     const auto before=diagnostics.ode_completed;
     std::ostringstream started;
-    started<<std::setprecision(17)<<"ePhoto joint Ci-Gs fallback started: initialization=cold Ci="<<ci<<" gs="<<gs<<'\n';
+    started<<std::setprecision(17)<<"ePhoto joint Ci-Gs fallback started: search_version="<<ephoto_joint_search_version
+        <<" initialization=cold Ci="<<ci<<" gs="<<gs<<'\n';
     std::cerr<<started.str()<<std::flush;
     try {
         const auto result=solve_ephoto_joint(evaluate,ci,gs,minimum_gs,maximum_ci);
@@ -380,14 +394,41 @@ template<class Nested,class Raw,class Energy,class Photo>
 root_finding::result_t solve_ephoto_leaf_with_joint(Nested& nested,Raw& raw,
     ephoto_ci_context& context,Energy& energy,Photo& photo,double initial_gs,
     double minimum_gs,double hinted_gs,double maximum_ci,const std::string& label,
-    bool use_ephoto,bool allow_acceleration=true)
+    bool use_ephoto,bool allow_acceleration=true,bool allow_early_joint=true)
 {
+    const auto started=ephoto_runtime_diagnostics::clock::now();
+    const auto ode_before=ephoto_runtime().ode_completed;
+    std::size_t nested_calls=0;
+    auto counted_nested=[&](double gs) {++nested_calls;return nested(gs);};
+    auto report=[&](const char* trigger) {
+        std::ostringstream message;
+        message<<std::setprecision(10)<<"ePhoto joint handoff: trigger="<<trigger
+            <<" nested_calls="<<nested_calls<<" nested_seconds="
+            <<std::chrono::duration<double>(ephoto_runtime_diagnostics::clock::now()-started).count();
+        if(ephoto_runtime().enabled()) message<<" nested_ode_calls="<<ephoto_runtime().ode_completed-ode_before;
+        message<<'\n';
+        std::cerr<<message.str()<<std::flush;
+    };
     try {
-        return solve_ephoto_leaf_gs(nested,context,initial_gs,minimum_gs,hinted_gs,label,use_ephoto,allow_acceleration);
+        return solve_ephoto_leaf_gs(counted_nested,context,initial_gs,minimum_gs,hinted_gs,label,use_ephoto,allow_acceleration,allow_early_joint);
+    } catch(const ephoto_early_joint&) {
+        report("strict_verification");
+        try {
+            return solve_joint_ephoto_leaf(raw,context,energy,photo,photo.Ci,
+                context.last_gs_trial,minimum_gs,maximum_ci);
+        } catch(const std::runtime_error& error) {
+            std::cerr<<"ePhoto early joint failed; resuming ordinary cold solve: "<<error.what()<<'\n'<<std::flush;
+            // A failed speculative recovery cannot remove the original path.
+            // A new generation also isolates all memoized ordinary snapshots.
+            context.reset_for_cold_start();
+            return solve_ephoto_leaf_with_joint(nested,raw,context,energy,photo,
+                initial_gs,minimum_gs,NAN,maximum_ci,label,use_ephoto,false,false);
+        }
     } catch(const std::runtime_error& error) {
         const std::string original=error.what();
         if(!use_ephoto || !std::getenv("EPHOTO_JOINT_CI_GS") || !ephoto_leaf_option("EPHOTO_JOINT_CI_GS") ||
            original.find("strict final conductance residual")==std::string::npos) throw;
+        report("exhausted_refinement");
         try {
             return solve_joint_ephoto_leaf(raw,context,energy,photo,photo.Ci,
                 context.last_gs_trial,minimum_gs,maximum_ci);

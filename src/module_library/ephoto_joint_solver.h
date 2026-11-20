@@ -2,9 +2,16 @@
 #define EPHOTO_JOINT_SOLVER_H
 #include <array>
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
+
+constexpr int ephoto_joint_search_version=4;
+constexpr std::size_t ephoto_joint_max_evaluations=200;
 
 struct ephoto_joint_result {
     double ci, gs;
@@ -20,7 +27,7 @@ inline bool ephoto_joint_accepted(double gs,const std::array<double,2>& r) {
 // regularized least-squares steps when the local Jacobian is ill-conditioned.
 // Coordinates are Ci (ppm) and Gs/0.01 to keep step sizes comparable.
 template<class Evaluate>
-ephoto_joint_result solve_ephoto_joint(Evaluate&& evaluate,double ci,double gs,
+ephoto_joint_result solve_ephoto_joint_once(Evaluate&& evaluate,double ci,double gs,
     double minimum_gs,double maximum_ci,std::size_t maximum_evaluations=120)
 {
     using Pair=std::array<double,2>;
@@ -92,5 +99,73 @@ ephoto_joint_result solve_ephoto_joint(Evaluate&& evaluate,double ci,double gs,
         if(!advanced) throw std::runtime_error("joint Ci-Gs search could not reduce both residuals");
     }
     throw std::runtime_error("joint Ci-Gs iteration limit reached");
+}
+
+// Multiple nearby basins can contain distinct roots. Reserve work for new
+// starting pairs instead of spending the entire budget at a stalled point.
+template<class Evaluate>
+ephoto_joint_result solve_ephoto_joint(Evaluate&& evaluate,double ci,double gs,
+    double minimum_gs,double maximum_ci,std::size_t maximum_evaluations=ephoto_joint_max_evaluations)
+{
+    using Pair=std::array<double,2>;
+    if(!std::isfinite(ci) || !std::isfinite(gs) || !std::isfinite(minimum_gs) ||
+       !std::isfinite(maximum_ci) || minimum_gs<0. || maximum_ci<=1e-6 || maximum_evaluations==0)
+        throw std::runtime_error("invalid joint Ci-Gs search inputs");
+    ci=std::max(1e-6,std::min(ci,maximum_ci));
+    gs=std::max(minimum_gs,gs);
+    const double upper=std::max(1.,2*gs);
+    std::size_t calls=0;
+    Pair first{{NAN,NAN}},best_x{{ci,gs}},best_f{{NAN,NAN}};
+    double best_merit=std::numeric_limits<double>::infinity();
+    bool have_solution=false;
+    ephoto_joint_result sampled{};
+    auto shared=[&](double c,double g) {
+        if(calls>=maximum_evaluations) throw std::runtime_error("joint total evaluation limit reached");
+        ++calls;
+        const auto f=evaluate(c,g);
+        if(calls==1) first=f;
+        const double score=std::hypot(f[0],f[1]);
+        if(std::isfinite(score) && score<best_merit) {best_merit=score;best_x={{c,g}};best_f=f;}
+        if(ephoto_joint_accepted(g,f) && !have_solution) {
+            have_solution=true;sampled={c,g,f,calls};
+        }
+        return f;
+    };
+    std::string reason;
+    auto attempt=[&](double c,double g,std::size_t budget,ephoto_joint_result& result) {
+        try {
+            result=solve_ephoto_joint_once(shared,c,g,minimum_gs,maximum_ci,budget);
+            result.evaluations=calls;
+            return true;
+        } catch(const std::runtime_error& error) {reason=error.what();}
+        if(have_solution) {result=sampled;result.evaluations=calls;return true;}
+        return false;
+    };
+    ephoto_joint_result result;
+    const std::size_t initial_budget=std::min<std::size_t>(120,maximum_evaluations);
+    if(attempt(ci,gs,std::min<std::size_t>(40,initial_budget),result)) return result;
+    const double direction=std::isfinite(first[1]) && first[1]<0. ? -1. : 1.;
+    for(int restart=0;restart<4 && calls<maximum_evaluations;++restart) {
+        const double sign=restart%2==0 ? direction : -direction;
+        const double radius=restart<2 ? 1. : 2.;
+        const double c=std::max(1e-6,std::min(ci+sign*radius*.25,maximum_ci));
+        const double g=std::max(minimum_gs,std::min(gs+sign*radius*.01,upper));
+        // Preserve the first three starts exactly. Wider starts only use the
+        // extra budget after the original recovery sequence has failed.
+        const std::size_t remaining=(restart<2 ? initial_budget : maximum_evaluations)-calls;
+        const std::size_t budget=restart==0 ? std::max<std::size_t>(1,remaining/2) :
+            restart==1 ? remaining : std::min<std::size_t>(40,remaining);
+        std::ostringstream message;
+        message<<std::setprecision(17)<<"ePhoto joint Ci-Gs restart: attempt="<<restart+2
+            <<" Ci="<<c<<" gs="<<g<<" budget="<<budget<<" used="<<calls<<'\n';
+        std::cerr<<message.str()<<std::flush;
+        if(attempt(c,g,budget,result)) return result;
+    }
+    std::ostringstream message;
+    message<<std::setprecision(17)<<"joint Ci-Gs recovery failed: evaluations="<<calls
+        <<" best_Ci="<<best_x[0]<<" best_Gs="<<best_x[1]
+        <<" Ci_residual="<<best_f[0]<<" Gs_residual="<<best_f[1]<<" reason="<<reason;
+    std::cerr<<message.str()<<'\n'<<std::flush;
+    throw std::runtime_error(message.str());
 }
 #endif
