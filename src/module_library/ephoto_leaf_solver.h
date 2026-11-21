@@ -14,6 +14,7 @@
 #include "c3_temperature_response.h"
 #include "ephoto_ci_bracket.h"
 #include "ephoto_joint_solver.h"
+#include "ephoto_reduced_solver.h"
 #include "../math/roots/onedim/fixed_point.h"
 #include "../math/roots/onedim/dekker.h"
 #include "../math/roots/onedim/illinois.h"
@@ -154,6 +155,8 @@ root_finding::result_t recover_local_ephoto_leaf(Evaluate& raw, ephoto_ci_contex
 
 // Internal control signal: only a failed strict verification can request the
 // experimental early handoff. It never establishes convergence.
+struct ephoto_reduced_requested {};
+
 struct ephoto_early_joint : std::runtime_error {
     ephoto_early_joint() : std::runtime_error("strict cold conductance verification requested early joint recovery") {}
 };
@@ -161,7 +164,7 @@ struct ephoto_early_joint : std::runtime_error {
 // Ordinary fixed-point/bracketed strategy and final acceptance tolerances.
 // Coarse Ci work never establishes final convergence.
 template <typename Evaluate>
-root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& context, double initial_gs, double minimum_gs, double hinted_gs, const std::string& label, bool use_ephoto, bool allow_acceleration = true, bool allow_early_joint = true)
+root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& context, double initial_gs, double minimum_gs, double hinted_gs, const std::string& label, bool use_ephoto, bool allow_acceleration = true, bool allow_early_joint = true, bool allow_reduced = false)
 {
     const bool adaptive = allow_acceleration && use_ephoto && ephoto_leaf_option("EPHOTO_ADAPTIVE_CI");
     bool strict = !adaptive;
@@ -324,7 +327,7 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
             context.reset_for_cold_start();
             if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
             return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
-                                        std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false, allow_early_joint);
+                                        std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false, allow_early_joint, allow_reduced);
         }
         std::ostringstream message;
         message << std::setprecision(17) << label << ": strict final conductance residual exceeds tolerance"
@@ -334,10 +337,11 @@ root_finding::result_t solve_ephoto_leaf_gs(Evaluate&& raw, ephoto_ci_context& c
         if (!local_recovery_error.empty()) message << " local_Ci_recovery=" << local_recovery_error;
         throw std::runtime_error(message.str());
     } catch (const ephoto_unsteady_acceleration&) {
+        if (allow_reduced) throw ephoto_reduced_requested{};
         context.reset_for_cold_start();
         if (ephoto_runtime().enabled()) ++ephoto_runtime().leaf_cold_restarts;
         return solve_ephoto_leaf_gs(raw, context, initial_gs, minimum_gs,
-                                    std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false, allow_early_joint);
+                                    std::numeric_limits<double>::quiet_NaN(), label, use_ephoto, false, allow_early_joint, allow_reduced);
     }
 }
 
@@ -390,12 +394,71 @@ root_finding::result_t solve_joint_ephoto_leaf(Raw& raw,ephoto_ci_context& conte
     }
 }
 
+template<class Raw,class Energy,class Photo>
+root_finding::result_t solve_reduced_ephoto_leaf(Raw& raw,ephoto_ci_context& context,
+    Energy& energy,Photo& photo,const ephoto_reduced_projection& project,
+    double gs,double minimum_gs,double maximum_ci)
+{
+    const bool reuse=context.reuse_biochemical_state,guard=context.guard_acceleration;
+    context.begin_joint_evaluation();
+    using Snapshot=std::tuple<Energy,Photo>;
+    std::map<std::pair<double,double>,Snapshot> cache;
+    auto evaluate=[&](double ci,double trial_gs) {
+        context.joint_ci=ci;
+        const auto key=std::make_pair(ci,trial_gs);
+        const auto found=cache.find(key);
+        if(found==cache.end()) {
+            raw(trial_gs);cache.emplace(key,Snapshot{energy,photo});
+        } else {energy=std::get<0>(found->second);photo=std::get<1>(found->second);}
+        context.previous_ci=photo.Ci;context.last_gs_trial=trial_gs;
+        return std::array<double,3>{{photo.residual,photo.Gs-trial_gs,photo.Assim}};
+    };
+    const auto started=ephoto_runtime_diagnostics::clock::now();
+    const auto before=ephoto_runtime().ode_completed;
+    try {
+        auto result=solve_ephoto_reduced(evaluate,project,gs,minimum_gs,maximum_ci);
+        const auto actual=evaluate(result.ci,result.gs);
+        if(!ephoto_joint_accepted(result.gs,{{actual[0],actual[1]}}))
+            throw std::runtime_error("reduced Ci-Gs output verification failed");
+        std::cerr<<std::setprecision(17)<<"ePhoto reduced Ci-Gs accepted: version="<<ephoto_reduced_search_version
+            <<" initialization=cold Ci="<<result.ci<<" gs="<<result.gs
+            <<" Ci_residual="<<actual[0]<<" Gs_residual="<<actual[1]
+            <<" evaluations="<<result.evaluations<<" seconds="
+            <<std::chrono::duration<double>(ephoto_runtime_diagnostics::clock::now()-started).count();
+        if(ephoto_runtime().enabled()) std::cerr<<" ode_calls="<<ephoto_runtime().ode_completed-before;
+        std::cerr<<'\n'<<std::flush;
+        return {result.gs,actual[1],result.evaluations,root_finding::Flag::residual_zero};
+    } catch(...) {
+        context.joint_evaluation=false;context.joint_ci=NAN;
+        context.reuse_biochemical_state=reuse;context.guard_acceleration=guard;
+        throw;
+    }
+}
+
 template<class Nested,class Raw,class Energy,class Photo>
 root_finding::result_t solve_ephoto_leaf_with_joint(Nested& nested,Raw& raw,
     ephoto_ci_context& context,Energy& energy,Photo& photo,double initial_gs,
     double minimum_gs,double hinted_gs,double maximum_ci,const std::string& label,
-    bool use_ephoto,bool allow_acceleration=true,bool allow_early_joint=true)
+    bool use_ephoto,bool allow_acceleration=true,bool allow_early_joint=true,
+    const ephoto_reduced_projection* reduced=nullptr,bool allow_reduced=true)
 {
+    const bool reduced_enabled=allow_reduced && use_ephoto && reduced && bool(*reduced) &&
+        std::getenv("EPHOTO_REDUCED_CI_GS") && ephoto_leaf_option("EPHOTO_REDUCED_CI_GS");
+    auto reduced_or_original=[&](double seed) {
+        std::cerr<<"ePhoto reduced Ci-Gs started: trigger=unsteady_leaf gs="<<seed<<'\n'<<std::flush;
+        try {return solve_reduced_ephoto_leaf(raw,context,energy,photo,*reduced,seed,minimum_gs,maximum_ci);}
+        catch(const std::runtime_error& error) {
+            std::cerr<<"ePhoto reduced Ci-Gs failed; resuming ordinary cold solve: "<<error.what()<<'\n'<<std::flush;
+            context.reset_for_cold_start();
+            return solve_ephoto_leaf_with_joint(nested,raw,context,energy,photo,
+                initial_gs,minimum_gs,NAN,maximum_ci,label,use_ephoto,false,allow_early_joint,reduced,false);
+        }
+    };
+    // A previously unsteady leaf already bypasses acceleration. Try the reduced
+    // cold residual before paying its ordinary nested solve; retain that solve
+    // if this bounded positive-branch search fails.
+    if(reduced_enabled && !allow_acceleration)
+        return reduced_or_original(std::isfinite(hinted_gs) ? hinted_gs : initial_gs);
     const auto started=ephoto_runtime_diagnostics::clock::now();
     const auto ode_before=ephoto_runtime().ode_completed;
     std::size_t nested_calls=0;
@@ -410,7 +473,9 @@ root_finding::result_t solve_ephoto_leaf_with_joint(Nested& nested,Raw& raw,
         std::cerr<<message.str()<<std::flush;
     };
     try {
-        return solve_ephoto_leaf_gs(counted_nested,context,initial_gs,minimum_gs,hinted_gs,label,use_ephoto,allow_acceleration,allow_early_joint);
+        return solve_ephoto_leaf_gs(counted_nested,context,initial_gs,minimum_gs,hinted_gs,label,use_ephoto,allow_acceleration,allow_early_joint,reduced_enabled);
+    } catch(const ephoto_reduced_requested&) {
+        return reduced_or_original(context.last_gs_trial);
     } catch(const ephoto_early_joint&) {
         report("strict_verification");
         try {
@@ -422,7 +487,7 @@ root_finding::result_t solve_ephoto_leaf_with_joint(Nested& nested,Raw& raw,
             // A new generation also isolates all memoized ordinary snapshots.
             context.reset_for_cold_start();
             return solve_ephoto_leaf_with_joint(nested,raw,context,energy,photo,
-                initial_gs,minimum_gs,NAN,maximum_ci,label,use_ephoto,false,false);
+                initial_gs,minimum_gs,NAN,maximum_ci,label,use_ephoto,false,false,reduced,false);
         }
     } catch(const std::runtime_error& error) {
         const std::string original=error.what();

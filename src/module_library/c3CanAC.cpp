@@ -1,3 +1,4 @@
+#include "ephoto_reduced_projection.h"
 #include <algorithm>
 #include <cmath>
 #include "../framework/constants.h"
@@ -200,12 +201,16 @@ canopy_photosynthesis_outputs c3CanAC(
             return photo.Gs;
         };
 
+        const auto reduced=active_ephoto && std::getenv("EPHOTO_REDUCED_CI_GS") && ephoto_leaf_option("EPHOTO_REDUCED_CI_GS")
+            ? make_ephoto_reduced_projection(absorbed_longwave,j_shortwave,atmospheric_pressure,
+                ambient_temperature,gbw_canopy,leaf_width,RH,layer_wind_speed,Catm,gs_minimum,StomataWS*b1)
+            : ephoto_reduced_projection{};
         auto cached_gs=memoize_ephoto_leaf_trial(evaluate_gs,ci_context,et,photo,active_ephoto);
         root_finding::result_t result;
         try {
             result=solve_ephoto_leaf_with_joint(cached_gs,evaluate_gs,ci_context,et,photo,gsw_estimate,
                 gs_minimum,hint ? hint->gs : std::numeric_limits<double>::quiet_NaN(),2*Catm,
-                "c3Canopy",active_ephoto,!known_unsteady);
+                "c3Canopy",active_ephoto,!known_unsteady,true,&reduced);
         } catch(const std::runtime_error& error) {
             std::ostringstream message;
             message<<std::setprecision(17)<<error.what()

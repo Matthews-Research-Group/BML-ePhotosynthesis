@@ -1,3 +1,4 @@
+#include "ephoto_reduced_projection.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -172,10 +173,14 @@ void c3_leaf_photosynthesis::do_operation() const
         return photo.Gs;
     };
 
+    const auto reduced=active_ephoto && std::getenv("EPHOTO_REDUCED_CI_GS") && ephoto_leaf_option("EPHOTO_REDUCED_CI_GS")
+        ? make_ephoto_reduced_projection(absorbed_longwave,absorbed_shortwave,atmospheric_pressure,
+            ambient_temperature,gbw_canopy,leafwidth,rh,windspeed,Catm,gs_minimum,StomataWS*b1)
+        : ephoto_reduced_projection{};
     auto cached_gs=memoize_ephoto_leaf_trial(evaluate_gs,ci_context,et,photo,active_ephoto);
     const auto result=solve_ephoto_leaf_with_joint(cached_gs,evaluate_gs,ci_context,et,photo,initial_stomatal_conductance,
         gs_minimum,use_hint ? previous_leaf_hint.gs : std::numeric_limits<double>::quiet_NaN(),2*Catm,
-        "c3_leaf_photosynthesis",active_ephoto,!known_unsteady);
+        "c3_leaf_photosynthesis",active_ephoto,!known_unsteady,true,&reduced);
     if(active_ephoto) {
         previous_leaf_hint={NAN,NAN,ambient_temperature,absorbed_ppfd/.85,rh,configuration,photo.penalty>=.01};
         if(photo.penalty<.01 && std::isfinite(photo.Ci) && std::abs(photo.residual)<=ephoto_ci_abs_tolerance) {
